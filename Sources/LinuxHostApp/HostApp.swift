@@ -38,7 +38,7 @@ public enum HostApp {
         }
 
         if info.contractNames.contains(LinuxUIModule.contracts[0].name) {
-            guard let sdl = SDLApp.start(title: info.name) else {
+            guard let sdl = SDLApp.start(title: info.name, identifier: info.identifier, version: info.version) else {
                 fail("the app has a user interface, and SDL can't show it")
             }
             LinuxUIModule.presenter = sdl
