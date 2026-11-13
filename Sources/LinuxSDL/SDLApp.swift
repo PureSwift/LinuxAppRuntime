@@ -28,8 +28,12 @@ public final class SDLApp: MainLoopDriver, RendererPresenter {
     private let wakeEvent: UInt32
 
     /// Starts SDL. `nil` without a display or SDL3_ttf, or with no font.
-    public static func start(title: String, loop: MainLoop = .shared) -> SDLApp? {
+    /// `identifier` becomes the windows' Wayland app ID and X11 class, which
+    /// the app's desktop entry matches.
+    public static func start(title: String, identifier: String? = nil, version: String? = nil,
+                             loop: MainLoop = .shared) -> SDLApp? {
         if let shared { return shared }
+        _ = SDL_SetAppMetadata(title, version, identifier)
         // SDL_INIT_VIDEO.
         guard SDL_Init(0x20) else {
             HostLog.error("SDL video didn't start: \(SDL.error)")
