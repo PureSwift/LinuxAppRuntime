@@ -1,7 +1,8 @@
 # Linux host — Plan
 
-**Status:** phase 1 is implemented, with these differences from the design
-below:
+**Status:** phases 1 and 2 are implemented; the packager has its own
+design, [Packager.md](Packager.md). Phase 1 differs from the design below
+in these ways:
 
 - **Rounded corners** clip to rectangles: SDL has no rounded clip, so
   `cornerRadius` rounds the fills that cover its rectangle exactly (the
@@ -27,7 +28,7 @@ into a Linux program:
 - the **SwiftUI player**, which lays out and draws the SwiftUI frontend's
   render IR with SDL3 and SDL3_ttf, and sends input back;
 - **Bluetooth** over BlueZ's D-Bus API;
-- later, the **packager**, `linux-app`.
+- the **packager**, `linux-app` ([Packager.md](Packager.md)).
 
 References like §7.6 are to `Documentation/DynamicRuntime.md` in AppRuntime;
 the render IR is `Documentation/RenderIR.md` there. Perry
@@ -89,7 +90,7 @@ the same loop. `MainLoopClock` is the `HostClock`: `CLOCK_MONOTONIC` for
 | `LinuxSDL` | The `Canvas` and text measurer over `SDL_Renderer` and SDL3_ttf, the window, input translation, the SDL main-loop driver, fonts through fontconfig |
 | `LinuxBluetooth` | `Central`, `Peripheral`, `Service`, `Characteristic`, `Descriptor`, `Advertisement` over BlueZ |
 | `LinuxHostApp` | `main`: reads the app's keys, starts the host, opens the window when the guest makes a renderer, runs the loop |
-| `linux-app` | Later: the packager (§8) |
+| `LinuxPackager`, `linux-app` | The packager (§8, [Packager.md](Packager.md)) |
 
 The package depends on AppRuntime without its `GuestExports` trait, like
 DarwinAppRuntime, so the slice's `rt_dispatch` and `rt_finalize` are the
