@@ -1,0 +1,34 @@
+name: Swift
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  linux:
+    name: Linux (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    container: swift:6.4.2
+    env:
+      # SDL's headless driver, for the window tests.
+      SDL_VIDEO_DRIVER: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install SDL3, SDL3_ttf and fontconfig
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends libsdl3-dev libsdl3-ttf-dev libfontconfig-dev fonts-dejavu-core
+      - name: Build
+        run: swift build --build-tests
+      - name: Test
+        run: swift test --skip-build
