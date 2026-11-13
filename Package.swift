@@ -50,12 +50,16 @@ let package = Package(
         .library(name: "LinuxBluetooth", targets: ["LinuxBluetooth"]),
         .library(name: "LinuxHostApp", targets: ["LinuxHostApp"]),
         .executable(name: "linux-app-host", targets: ["LinuxAppHost"]),
+        .executable(name: "linux-app", targets: ["LinuxAppTool"]),
     ],
     dependencies: [
         appRuntime,
         // D-Bus, which Bluetooth talks to BlueZ over; it has no releases.
         .package(url: "https://github.com/wendylabsinc/dbus.git", revision: "5727296ecaef9655b781f82c7ebde5c9f0d45551"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.4.0"),
+        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
+        // SHA-256, for bundles' CodeResources; the D-Bus package uses it too.
+        .package(url: "https://github.com/apple/swift-crypto.git", "3.0.0"..<"5.0.0"),
     ],
     targets: [
 
@@ -113,11 +117,25 @@ let package = Package(
             linkerSettings: appLibrary.map { [.unsafeFlags([$0])] } ?? []
         ),
 
+        // MARK: - Packager
+
+        // The contract modules give `validate` the descriptors of what this
+        // host implements; none of them needs SDL.
+        .target(
+            name: "LinuxPackager",
+            dependencies: ["LinuxHost", "LinuxUI", "LinuxBluetooth", .product(name: "Crypto", package: "swift-crypto")]
+        ),
+        .executableTarget(
+            name: "LinuxAppTool",
+            dependencies: ["LinuxPackager", .product(name: "ArgumentParser", package: "swift-argument-parser")]
+        ),
+
         // MARK: - Tests
 
         .testTarget(name: "LinuxHostTests", dependencies: ["LinuxHost"], swiftSettings: host),
         .testTarget(name: "LinuxUITests", dependencies: ["LinuxUI"], swiftSettings: host),
         .testTarget(name: "LinuxSDLTests", dependencies: ["LinuxSDL"], swiftSettings: host),
         .testTarget(name: "LinuxBluetoothTests", dependencies: ["LinuxBluetooth"], swiftSettings: host),
+        .testTarget(name: "LinuxPackagerTests", dependencies: ["LinuxPackager", "LinuxHostApp"]),
     ]
 )
