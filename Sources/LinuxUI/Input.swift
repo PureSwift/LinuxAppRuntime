@@ -49,8 +49,10 @@ extension RenderStore {
         }
         switch event {
         case .pointerDown(let point, let button):
+            pointerLocation = point
             pointerDown(point, button: button)
         case .pointerMove(let point):
+            pointerLocation = point
             pointerMove(point)
         case .pointerUp(let point, let button):
             pointerUp(point, button: button)
@@ -359,6 +361,17 @@ extension RenderStore {
             goBack()
         case .tab:
             moveFocus(backwards: modifiers.contains(.shift))
+        case .up, .down, .pageUp, .pageDown:
+            // A gamepad's D-pad: scroll what's under the pointer.
+            let point = pointerLocation ?? frame.map { Point(x: $0.bounds.midX, y: $0.bounds.midY) } ?? .zero
+            let page = max((frame?.bounds.height ?? 400) - 80, 40)
+            let distance: Double = switch key {
+            case .up: -40
+            case .down: 40
+            case .pageUp: -page
+            default: page
+            }
+            scroll(at: point, dx: 0, dy: distance)
         default:
             break
         }
