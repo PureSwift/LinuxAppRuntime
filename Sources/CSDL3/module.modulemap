@@ -1,7 +1,0 @@
-module CSDL3 [system] {
-    header "shim.h"
-    link "SDL3"
-    link "SDL3_ttf"
-    link "fontconfig"
-    export *
-}
