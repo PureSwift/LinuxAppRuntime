@@ -1,4 +1,5 @@
 @_exported import CRuntime
+import CLinuxHost
 @_exported import LinuxHost
 import Foundation
 import LinuxBluetooth
@@ -16,7 +17,8 @@ import LinuxUI
 ///   linked in; by default `App.app` next to the executable, or
 ///   `LINUXAPPRUNTIME_BUNDLE`.
 /// - `--open`: a URL for the app to open once it started.
-/// - `--script`: input to replay and screenshots to take (`HostScript`).
+/// - `--script`: input to replay and screenshots to take (`HostScript`); or
+///   `LINUXAPPRUNTIME_SCRIPT`.
 public enum HostApp {
 
     /// Every module this host has.
@@ -60,7 +62,9 @@ public enum HostApp {
             }
         }
         var script: HostScript?
-        if let path = arguments.script {
+        // A script from the environment too, for launchers that don't pass
+        // arguments through (`Scripts/portmaster.sh test`).
+        if let path = arguments.script ?? ProcessInfo.processInfo.environment["LINUXAPPRUNTIME_SCRIPT"].flatMap({ $0.isEmpty ? nil : $0 }) {
             do {
                 script = try HostScript(contentsOf: path)
             } catch {
