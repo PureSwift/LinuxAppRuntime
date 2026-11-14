@@ -10,6 +10,9 @@ public struct DesktopEntry: Equatable {
 
     public var version: String
 
+    /// `Name[locale]`, by POSIX locale (`pt_BR`).
+    public var localizedNames: [String: String] = [:]
+
     public init(identifier: String, name: String, exec: String, version: String) {
         self.identifier = identifier
         self.name = name
@@ -18,19 +21,32 @@ public struct DesktopEntry: Equatable {
     }
 
     public var text: String {
-        """
-        [Desktop Entry]
-        Type=Application
-        Name=\(Self.escape(name))
-        Exec=\(Self.quote(exec)) %u
-        Icon=\(Self.escape(identifier))
-        Terminal=false
-        Categories=Utility;
-        StartupWMClass=\(Self.escape(identifier))
-        X-AppRuntime-Identifier=\(Self.escape(identifier))
-        X-AppRuntime-Version=\(Self.escape(version))
+        var lines = [
+            "[Desktop Entry]",
+            "Type=Application",
+            "Name=\(Self.escape(name))",
+        ]
+        lines += localizedNames.sorted { $0.key < $1.key }.map { "Name[\($0.key)]=\(Self.escape($0.value))" }
+        lines += [
+            "Exec=\(Self.quote(exec)) %u",
+            "Icon=\(Self.escape(identifier))",
+            "Terminal=false",
+            "Categories=Utility;",
+            "StartupWMClass=\(Self.escape(identifier))",
+            "X-AppRuntime-Identifier=\(Self.escape(identifier))",
+            "X-AppRuntime-Version=\(Self.escape(version))",
+        ]
+        return lines.joined(separator: "\n") + "\n"
+    }
 
-        """
+    /// A BCP 47 tag as a desktop entry locale: `pt-BR` is `pt_BR`, and
+    /// Chinese scripts become their usual regions.
+    public static func locale(_ tag: String) -> String {
+        switch tag {
+        case "zh-Hans": return "zh_CN"
+        case "zh-Hant": return "zh_TW"
+        default: return tag.replacingOccurrences(of: "-", with: "_")
+        }
     }
 
     /// A string value: backslashes, line breaks and tabs escaped.
