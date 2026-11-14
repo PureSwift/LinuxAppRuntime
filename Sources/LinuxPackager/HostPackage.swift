@@ -1,3 +1,4 @@
+import Crypto
 import Foundation
 
 /// The SwiftPM package that builds an app's host (`Packager.md` §3): an
@@ -41,6 +42,30 @@ public struct HostPackage {
             }
         }
         throw PackagerError("can't find LinuxAppRuntime's source; pass --host-package or set LINUXAPPRUNTIME_PATH")
+    }
+
+    /// Copies the app's library into the package as `lib/libapp-<hash>.a`.
+    /// SwiftPM doesn't relink when a library in the linker flags changes,
+    /// but a new name changes the manifest, which it does notice.
+    public static func stage(_ library: URL, in directory: URL) throws(PackagerError) -> URL {
+        guard let data = FileManager.default.contents(atPath: library.path) else {
+            throw PackagerError("can't read \(library.path)")
+        }
+        let hash = SHA256.hash(data: data).prefix(8).map { String(format: "%02x", $0) }.joined()
+        let lib = directory.appendingPathComponent("lib")
+        let staged = lib.appendingPathComponent("libapp-\(hash).a")
+        do {
+            try FileManager.default.createDirectory(at: lib, withIntermediateDirectories: true)
+            for old in try FileManager.default.contentsOfDirectory(atPath: lib.path) where old != staged.lastPathComponent {
+                try FileManager.default.removeItem(at: lib.appendingPathComponent(old))
+            }
+            if !FileManager.default.fileExists(atPath: staged.path) {
+                try data.write(to: staged)
+            }
+        } catch {
+            throw PackagerError("can't copy \(library.path) into \(lib.path): \(error)")
+        }
+        return staged
     }
 
     var manifest: String {
@@ -102,11 +127,20 @@ public struct HostPackage {
         }
     }
 
-    /// Builds the host; the executable's path.
-    public func build(configuration: String, runner: CommandRunning) throws(PackagerError) -> URL {
+    /// Builds the host; the executable's path. `extraArguments` go to
+    /// `swift build`, such as a Swift SDK for another architecture. With
+    /// `staticSwift`, the Swift
+    /// runtime, Foundation and Dispatch are linked in, so the app runs where
+    /// Swift isn't installed.
+    public func build(configuration: String, staticSwift: Bool = true, extraArguments: [String] = [],
+                      runner: CommandRunning) throws(PackagerError) -> URL {
         try write()
-        let arguments = ["swift", "build", "--package-path", directory.path, "--scratch-path",
+        var arguments = ["swift", "build", "--package-path", directory.path, "--scratch-path",
                          directory.appendingPathComponent(".build").path, "-c", configuration, "--product", Self.product]
+        if staticSwift {
+            arguments.append("--static-swift-stdlib")
+        }
+        arguments += extraArguments
         // The host package links an app itself when this is set.
         let environment = ["LINUXAPPRUNTIME_APP_LIBRARY": ""]
         try runner.run(arguments, directory: directory, environment: environment)
