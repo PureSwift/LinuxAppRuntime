@@ -63,7 +63,9 @@ Sources/<Executable>/main.swift
                 HostApp.main(AppEntryPoints(main: rt_main, …))
 ```
 
-`swift build -c release` (or `--configuration debug`) builds it. This
+`swift build -c release` (or `--configuration debug`) builds it. The app's library is copied in as `lib/libapp-<hash>.a`: SwiftPM
+doesn't relink when a library named in linker flags changes, but a new name
+changes the manifest. This
 package is found from `--host-package`, `LINUXAPPRUNTIME_PATH`, or the
 source tree `linux-app` was built from.
 
