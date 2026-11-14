@@ -1,5 +1,6 @@
 import CSDL3
 import Foundation
+import SDL3Swift
 import LinuxHost
 import LinuxUI
 
@@ -16,11 +17,35 @@ public final class SDLApp: MainLoopDriver, RendererPresenter {
     /// The title new windows get.
     public var title: String
 
-    /// The size new windows open at, in points: `LINUXAPPRUNTIME_WINDOW_SIZE`
+    /// The size new windows open at, in points (a fullscreen window takes
+    /// the display's): `LINUXAPPRUNTIME_WINDOW_SIZE`
     /// (`WIDTHxHEIGHT`), or a phone-like 420 × 760.
     public var windowSize: Size
 
-    public private(set) var windows: [SDLWindow] = []
+    public private(set) var windows: [RendererWindow] = []
+
+    /// How windows show, from the environment (`PortMaster.md` §2).
+    public struct DisplayOptions {
+        /// `LINUXAPPRUNTIME_FULLSCREEN=1`.
+        public var fullscreen = false
+        /// `LINUXAPPRUNTIME_SCALE`: pixels per point beyond the display's
+        /// density.
+        public var scale = 1.0
+        /// `LINUXAPPRUNTIME_CURSOR=1`: draw a pointer.
+        public var cursor = false
+
+        public init() { }
+
+        public init(environment: [String: String]) {
+            fullscreen = environment["LINUXAPPRUNTIME_FULLSCREEN"] == "1"
+            cursor = environment["LINUXAPPRUNTIME_CURSOR"] == "1"
+            if let value = environment["LINUXAPPRUNTIME_SCALE"].flatMap(Double.init), value > 0 {
+                scale = value
+            }
+        }
+    }
+
+    public var displayOptions = DisplayOptions(environment: ProcessInfo.processInfo.environment)
 
     /// Called when the last window closes; stops the loop by default.
     public var onLastWindowClosed: (() -> Void)?
@@ -34,9 +59,10 @@ public final class SDLApp: MainLoopDriver, RendererPresenter {
                              loop: MainLoop = .shared) -> SDLApp? {
         if let shared { return shared }
         _ = SDL_SetAppMetadata(title, version, identifier)
-        // SDL_INIT_VIDEO.
-        guard SDL_Init(0x20) else {
-            HostLog.error("SDL video didn't start: \(SDL.error)")
+        do {
+            try SDL.initialize(subSystems: [.video])
+        } catch {
+            HostLog.error("SDL video didn't start: \(error)")
             return nil
         }
         guard SDLTextEngine.shared.start() else {
@@ -85,7 +111,11 @@ public final class SDLApp: MainLoopDriver, RendererPresenter {
     }
 
     public func present(_ store: RenderStore) {
-        guard let window = SDLWindow(store: store, title: title, size: windowSize) else { return }
+        let size = Size(width: windowSize.width * displayOptions.scale, height: windowSize.height * displayOptions.scale)
+        guard let window = RendererWindow(store: store, title: title, size: size, options: displayOptions) else { return }
+        if displayOptions.cursor {
+            _ = SDL_HideCursor()
+        }
         windows.append(window)
     }
 
