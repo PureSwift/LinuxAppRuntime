@@ -13,6 +13,10 @@ public struct Packager {
         public var output: URL?
         /// Also write `<identifier>-<version>-<target>.tar.gz`.
         public var archive = false
+        /// Link the Swift runtime in (`--static-swift-stdlib`).
+        public var staticSwift = true
+        /// More `swift build` arguments: `--swift-sdk`, `--destination`.
+        public var buildArguments: [String] = []
         public var hostPackage: URL
         /// AppRuntime, for the wasm2c engine.
         public var appRuntime: URL?
@@ -69,9 +73,7 @@ public struct Packager {
             throw PackagerError(errors.map(\.description).joined(separator: "\n"))
         }
         let library = try library()
-        let host = HostPackage(directory: work.appendingPathComponent("host"), hostPackage: options.hostPackage,
-                               executable: bundle.executable, library: library)
-        let binary = try host.build(configuration: options.configuration, runner: runner)
+        let binary = try buildHost(library: library)
         let root = options.output ?? work.appendingPathComponent("out")
         try assemble(binary: binary, into: root, exec: bundle.executable)
         var archive: URL?
@@ -83,6 +85,15 @@ public struct Packager {
         }
         return Result(root: root, executable: root.appendingPathComponent("bin/\(bundle.executable)"),
                       archive: archive, diagnostics: diagnostics)
+    }
+
+    /// Builds the host linked with `library`; the executable's path.
+    func buildHost(library: URL) throws(PackagerError) -> URL {
+        let directory = work.appendingPathComponent("host")
+        let host = HostPackage(directory: directory, hostPackage: options.hostPackage,
+                               executable: bundle.executable, library: try HostPackage.stage(library, in: directory))
+        return try host.build(configuration: options.configuration, staticSwift: options.staticSwift,
+                              extraArguments: options.buildArguments, runner: runner)
     }
 
     /// The app's library for the engine.
@@ -150,7 +161,8 @@ public struct Packager {
 
             let applications = root.appendingPathComponent("share/applications")
             try files.createDirectory(at: applications, withIntermediateDirectories: true)
-            let entry = DesktopEntry(identifier: identifier, name: bundle.displayName, exec: exec, version: bundle.info.version)
+            var entry = DesktopEntry(identifier: identifier, name: bundle.displayName, exec: exec, version: bundle.info.version)
+            entry.localizedNames = bundle.localizedDisplayNames
             try entry.text.write(to: applications.appendingPathComponent("\(identifier).desktop"), atomically: true, encoding: .utf8)
 
             if let icon = bundle.icon {
