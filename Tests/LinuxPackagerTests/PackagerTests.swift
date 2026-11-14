@@ -123,10 +123,11 @@ import Testing
         // The build: a generated package for the app's library.
         let build = try #require(runner.commands.first)
         #expect(build.starts(with: ["swift", "build", "--package-path"]))
-        #expect(build.suffix(4) == ["-c", "debug", "--product", HostPackage.product])
+        #expect(build.contains("--static-swift-stdlib"), "Swift is linked in")
+        #expect(build[build.firstIndex(of: "--product")! + 1] == HostPackage.product)
         let manifest = try String(contentsOf: URL(fileURLWithPath: build[3]).appendingPathComponent("Package.swift"), encoding: .utf8)
         #expect(manifest.contains(#".package(name: "LinuxAppRuntime", path: "/src")"#))
-        #expect(manifest.contains(literal(try fixture.bundle.slice(.arm64)!.path)))
+        #expect(manifest.contains("/lib/libapp-"), "a copy named for its contents, so a new library relinks")
 
         // Packaging again replaces the tree.
         _ = try packager(fixture, runner: runner).package()
@@ -155,6 +156,25 @@ import Testing
         packager.options.archive = true
         let result = try packager.package()
         #expect(result.archive?.lastPathComponent == "org.example.Demo-1.2-linux-arm64.tar.gz")
+    }
+
+    @Test func desktopEntriesNameTheAppInEachLanguage() throws {
+        let fixture = try Fixture(signed: false)
+        let plist = fixture.url.appendingPathComponent("Info.plist")
+        var info = try #require(try PropertyListSerialization.propertyList(from: Data(contentsOf: plist), format: nil) as? [String: Any])
+        info["RTDisplayNameKey"] = "app.name"
+        info["CFBundleLocalizations"] = ["en", "pt-BR", "zh-Hans"]
+        try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0).write(to: plist)
+        for (language, name) in [("pt-BR", "Demonstração"), ("zh-Hans", "演示")] {
+            let directory = fixture.url.appendingPathComponent("resources/\(language).lproj")
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try "\"app.name\" = \"\(name)\";".write(to: directory.appendingPathComponent("Manifest.strings"), atomically: true, encoding: .utf8)
+        }
+        let bundle = try fixture.bundle
+        #expect(bundle.localizedDisplayNames == ["pt_BR": "Demonstração", "zh_CN": "演示"])
+        var entry = DesktopEntry(identifier: "a.b", name: "Demo", exec: "demo", version: "1")
+        entry.localizedNames = bundle.localizedDisplayNames
+        #expect(entry.text.contains("Name=Demo\nName[pt_BR]=Demonstração\nName[zh_CN]=演示\nExec=demo %u\n"))
     }
 
     @Test func desktopEntriesEscape() {
