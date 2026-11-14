@@ -1,0 +1,16 @@
+# A stand-in for PortMaster's control.txt, for Scripts/portmaster.sh test:
+# what a port's launcher reads, on no device in particular, with SDL's
+# headless driver.
+directory=roms
+DEVICE_ARCH=${DEVICE_ARCH:-aarch64}
+CFW_NAME=Test
+ESUDO=""
+GPTOKEYB=true
+DISPLAY_WIDTH=640
+DISPLAY_HEIGHT=480
+sdl_controllerconfig=""
+export SDL_VIDEO_DRIVER=offscreen
+
+get_controls() { :; }
+pm_platform_helper() { :; }
+pm_finish() { :; }
