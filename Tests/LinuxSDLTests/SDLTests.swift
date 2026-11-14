@@ -58,10 +58,10 @@ import Testing
     }
 
     @Test func keysTranslate() {
-        #expect(SDLWindow.key(SDL_Keycode(SDLK_BACKSPACE), 0)?.0 == .backspace)
-        let paste = SDLWindow.key(SDL_Keycode(SDLK_V), SDL_Keymod(SDL_KMOD_LCTRL))
+        #expect(RendererWindow.key(SDL_Keycode(SDLK_BACKSPACE), 0)?.0 == .backspace)
+        let paste = RendererWindow.key(SDL_Keycode(SDLK_V), SDL_Keymod(SDL_KMOD_LCTRL))
         #expect(paste?.0 == .character("v") && paste?.1 == .control)
-        #expect(SDLWindow.key(SDL_Keycode(SDLK_V), 0) == nil, "plain letters arrive as text")
+        #expect(RendererWindow.key(SDL_Keycode(SDLK_V), 0) == nil, "plain letters arrive as text")
     }
 }
 
