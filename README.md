@@ -31,10 +31,10 @@ through wasm2c, and the packaged app runs. See the
 |---|---|
 | `LinuxHost` | `AppHost` (checks, built-ins, modules, `rt_main`), `AppInfo`, `MainLoop` and its clock, `Permissions`, `Bundle`, `Application` |
 | `LinuxUI` | The player's model without SDL: render store, layout, drawing to a `Canvas`, input, text editing, lazy rows, navigation, presentations |
-| `LinuxSDL` | The window, `SDL_Renderer` canvas, SDL3_ttf text with fontconfig's fonts, and SDL as the main loop's driver |
+| `LinuxSDL` | The window, `SDL_Renderer` canvas, SDL3_ttf text with fontconfig's fonts (or bundled ones), and SDL as the main loop's driver, over [PureSwift/SDL](https://github.com/PureSwift/SDL)'s `SDL3Swift` and `CSDL3TTF` |
 | `LinuxBluetooth` | `Central`, `Peripheral`, `Service`, `Characteristic`, `Descriptor` and `Advertisement` over BlueZ, through `wendylabsinc/dbus` |
 | `LinuxHostApp`, `linux-app-host` | The app's `main` |
-| `LinuxPackager`, `linux-app` | The packager: validation, the host build, wasm2c, the install tree |
+| `LinuxPackager`, `linux-app` | The packager: validation, the host build, wasm2c, the install tree, PortMaster ports |
 
 ## Building
 
@@ -53,8 +53,8 @@ with this checkout at `/src`:
 Scripts/docker.sh swift test --scratch-path .build/linux
 ```
 
-AppRuntime comes from GitHub. `APPRUNTIME_PATH` points at a local checkout
-instead.
+AppRuntime and PureSwift/SDL come from GitHub. `APPRUNTIME_PATH` and
+`SDL_PATH` point at local checkouts instead.
 
 ## Packaging an app
 
@@ -96,9 +96,31 @@ mkdir -p .build/shots
 Scripts/run-app.sh .build/guest/org.pureswift.ExampleUI.app --script /src/Scripts/ExampleUI.script
 ```
 
+## PortMaster
+
+`linux-app portmaster` makes a [PortMaster](https://portmaster.games) port
+for aarch64 and armhf handhelds: the host built for their older glibc, SDL3
+built for them, a launcher, gamepad controls and the catalogue's metadata
+([design](Documentation/PortMaster.md)). In Docker:
+
+```sh
+Scripts/portmaster.sh build .build/guest/org.pureswift.ExampleUI.app all --porter "Your Name"
+Scripts/portmaster.sh test aarch64 /src/Scripts/ExampleUI-handheld.script
+```
+
+The bundle needs `linux-arm64` and `linux-armv7` slices (`guest.py bundle
+--target linux-arm64 --target linux-armv7`). Ports go to
+`.build/portmaster/<port>/`, laid out as in PortMaster's repository, and
+`<port>.zip`.
+
 | Variable | |
 |---|---|
 | `LINUXAPPRUNTIME_WINDOW_SIZE` | The window's size in points, `WIDTHxHEIGHT`; 420x760 by default |
 | `LINUXAPPRUNTIME_APPEARANCE` | `light` or `dark`; the system's by default |
 | `LINUXAPPRUNTIME_DEBUG` | `1` logs the host's debug messages |
-| `SDL_VIDEO_DRIVER` | `wayland`, `x11`, or `offscreen` for no display |
+| `LINUXAPPRUNTIME_FULLSCREEN` | `1`: one fullscreen window |
+| `LINUXAPPRUNTIME_SCALE` | Pixels per point beyond the display's density |
+| `LINUXAPPRUNTIME_CURSOR` | `1`: draw the pointer, for screens without one |
+| `LINUXAPPRUNTIME_FONTS` | A directory of fonts, for systems without fontconfig |
+| `LINUXAPPRUNTIME_SCRIPT` | A script, as `--script` |
+| `SDL_VIDEO_DRIVER` | `wayland`, `x11`, `kmsdrm`, or `offscreen` for no display |
