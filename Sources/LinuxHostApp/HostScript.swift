@@ -58,7 +58,7 @@ final class HostScript {
 
     static let verbs: Set<String> = ["dump", "wait", "tap", "click", "rightclick", "type", "key", "scroll", "expect", "screenshot", "quit"]
 
-    private var window: SDLWindow? {
+    private var window: RendererWindow? {
         SDLApp.shared?.windows.first
     }
 
@@ -148,7 +148,7 @@ final class HostScript {
         next()
     }
 
-    private func click(_ window: SDLWindow, _ point: Point, _ button: PointerButton) {
+    private func click(_ window: RendererWindow, _ point: Point, _ button: PointerButton) {
         window.inject(.pointerMove(point))
         window.inject(.pointerDown(point, button: button))
         window.inject(.pointerUp(point, button: button))
