@@ -10,7 +10,8 @@ import PackageDescription
 ///
 /// The environment:
 ///
-/// - `APPRUNTIME_PATH`: a local AppRuntime checkout instead of GitHub.
+/// - `APPRUNTIME_PATH`: a local AppRuntime checkout instead of GitHub; `SDL_PATH`
+///   likewise for PureSwift/SDL.
 /// - `LINUXAPPRUNTIME_APP_LIBRARY`: an app's `libapp.a` (a `linux-arm64` or
 ///   `linux-x86_64` slice from `guest.py slice`), which `linux-app-host`
 ///   links. Without it, `linux-app-host` builds without an app and says so
@@ -22,6 +23,14 @@ let appRuntime: Package.Dependency = {
         return .package(name: "AppRuntime", path: path, traits: [])
     }
     return .package(url: "https://github.com/PureSwift/AppRuntime.git", branch: "master", traits: [])
+}()
+
+/// `SDL_PATH` points at a local PureSwift/SDL checkout instead of GitHub.
+let sdl: Package.Dependency = {
+    if let path = environment["SDL_PATH"] {
+        return .package(name: "SDL", path: path)
+    }
+    return .package(url: "https://github.com/PureSwift/SDL.git", branch: "master")
 }()
 
 let appLibrary = environment["LINUXAPPRUNTIME_APP_LIBRARY"].flatMap { path in
@@ -54,6 +63,8 @@ let package = Package(
     ],
     dependencies: [
         appRuntime,
+        // SDL3 and SDL3_ttf, through PureSwift's SDL.
+        sdl,
         // D-Bus, which Bluetooth talks to BlueZ over; it has no releases.
         .package(url: "https://github.com/wendylabsinc/dbus.git", revision: "5727296ecaef9655b781f82c7ebde5c9f0d45551"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.4.0"),
@@ -78,17 +89,17 @@ let package = Package(
             dependencies: ["LinuxHost", runtime("DynamicUI"), runtime("RuntimeNative")],
             swiftSettings: host
         ),
-        // SDL3, SDL3_ttf and fontconfig from the system's include path;
-        // pkg-config's SDL flags would add -D_REENTRANT, which SwiftPM
-        // refuses.
-        .systemLibrary(
-            name: "CSDL3",
-            providers: [.apt(["libsdl3-dev", "libsdl3-ttf-dev", "libfontconfig-dev"])]
-        ),
         .target(
             name: "LinuxSDL",
-            dependencies: ["LinuxUI", "CSDL3"],
-            swiftSettings: host
+            dependencies: [
+                "LinuxUI",
+                .product(name: "SDL3Swift", package: "SDL"),
+                .product(name: "CSDL3TTF", package: "SDL"),
+            ],
+            swiftSettings: host,
+            // Also here: static Swift builds don't take the module map's
+            // link directives.
+            linkerSettings: [.linkedLibrary("SDL3"), .linkedLibrary("SDL3_ttf")]
         ),
 
         // MARK: - Bluetooth
@@ -105,9 +116,11 @@ let package = Package(
 
         // MARK: - App
 
+        // libc functions app slices need that older glibc lacks.
+        .target(name: "CLinuxHost"),
         .target(
             name: "LinuxHostApp",
-            dependencies: ["LinuxHost", "LinuxUI", "LinuxSDL", "LinuxBluetooth", runtime("CRuntime")],
+            dependencies: ["LinuxHost", "LinuxUI", "LinuxSDL", "LinuxBluetooth", "CLinuxHost", runtime("CRuntime")],
             swiftSettings: host
         ),
         .executableTarget(
