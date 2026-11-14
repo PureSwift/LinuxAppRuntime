@@ -119,6 +119,9 @@ public final class RenderStore {
 
     var pressedRole: Role?
 
+    /// Where the pointer last was: what the arrow keys scroll.
+    var pointerLocation: Point?
+
     var pressedFrame: Rect?
 
     /// The frame of the box last released, where its menu opens.
