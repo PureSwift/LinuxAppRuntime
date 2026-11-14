@@ -1,7 +1,8 @@
 # Linux host — Plan
 
 **Status:** phases 1 and 2 are implemented; the packager has its own
-design, [Packager.md](Packager.md). Phase 1 differs from the design below
+design, [Packager.md](Packager.md), and so do PortMaster ports,
+[PortMaster.md](PortMaster.md). Phase 1 differs from the design below
 in these ways:
 
 - **Rounded corners** clip to rectangles: SDL has no rounded clip, so
@@ -86,8 +87,7 @@ the same loop. `MainLoopClock` is the `HostClock`: `CLOCK_MONOTONIC` for
 |---|---|
 | `LinuxHost` | `AppHost` (checks, built-ins, modules, `rt_main`), `AppInfo` (the bundle's `Info.plist` keys), `HostModule`, `MainLoop`, `MainLoopClock`, `Permissions`, `Bundle`, `Application` |
 | `LinuxUI` | The player's model, with no SDL: the render store, layout, drawing to a `Canvas`, hit testing, focus and text editing, lazy rows, navigation, presentations. Tested with a recording canvas and a fixed-width text measurer. |
-| `CSDL3` | SDL3 and SDL3_ttf, through pkg-config (`sdl3`, `sdl3-ttf`) |
-| `LinuxSDL` | The `Canvas` and text measurer over `SDL_Renderer` and SDL3_ttf, the window, input translation, the SDL main-loop driver, fonts through fontconfig |
+| `LinuxSDL` | The `Canvas` and text measurer over `SDL_Renderer` and SDL3_ttf, the window, input translation, the SDL main-loop driver, fonts through fontconfig; SDL3 through [PureSwift/SDL](https://github.com/PureSwift/SDL) (`SDL3Swift`, `CSDL3TTF`) |
 | `LinuxBluetooth` | `Central`, `Peripheral`, `Service`, `Characteristic`, `Descriptor`, `Advertisement` over BlueZ |
 | `LinuxHostApp` | `main`: reads the app's keys, starts the host, opens the window when the guest makes a renderer, runs the loop |
 | `LinuxPackager`, `linux-app` | The packager (§8, [Packager.md](Packager.md)) |
