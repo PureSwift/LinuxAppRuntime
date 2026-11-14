@@ -10,7 +10,7 @@ struct LinuxApp: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "linux-app",
         abstract: "Package AppRuntime apps for Linux.",
-        subcommands: [Validate.self, Package.self, Install.self, Run.self]
+        subcommands: [Validate.self, Package.self, Install.self, Run.self, PortMaster.self]
     )
 }
 
@@ -35,7 +35,10 @@ struct BundleOptions: ParsableArguments {
     @Option(help: "AppRuntime's checkout, for wasm2c; APPRUNTIME_PATH, or the one SwiftPM resolves.")
     var appruntime: String?
 
-    @Flag(name: .shortAndLong, help: "Show the commands the packager runs.")
+    @Option(help: "The work directory for generated host packages and builds.")
+    var work = ".build/linux-app"
+
+        @Flag(name: .shortAndLong, help: "Show the commands the packager runs.")
     var verbose = false
 
     func load() throws -> (UniversalBundle, LinuxTarget, Engine) {
@@ -64,15 +67,17 @@ struct BundleOptions: ParsableArguments {
         return (bundle, target, engine)
     }
 
-    func packager(configuration: String = "release") throws -> Packager {
+    func packager(configuration: String = "release", buildArguments: [String] = []) throws -> Packager {
         let (bundle, target, engine) = try load()
-        if let native = LinuxTarget.native, native != target {
+        if let native = LinuxTarget.native, native != target, buildArguments.isEmpty {
             throw ValidationError("building for \(target.rawValue) on \(native.rawValue) isn't supported yet")
         }
         var options = Packager.Options(target: target, engine: engine, hostPackage: try HostPackage.locate(hostPackage))
         options.configuration = configuration
         options.allowMissingContracts = allowMissingContracts
         options.appRuntime = Wasm2c.locate(appruntime)
+        options.buildArguments = buildArguments
+        options.workRoot = URL(fileURLWithPath: work)
         return Packager(bundle: bundle, options: options, runner: CommandRunner(verbose: verbose))
     }
 }
@@ -170,6 +175,62 @@ extension LinuxApp {
             try process.run()
             process.waitUntilExit()
             throw ExitCode(process.terminationStatus)
+        }
+    }
+
+    struct PortMaster: ParsableCommand {
+
+        static let configuration = CommandConfiguration(
+            commandName: "portmaster",
+            abstract: "Make a PortMaster port for aarch64 or armhf handhelds.",
+            discussion: "Run it in the image of Docker/portmaster-<arch>.Dockerfile (Scripts/portmaster.sh), "
+                + "which has the toolchain, SDL3 built for old glibc, and the variables this reads."
+        )
+
+        @OptionGroup var options: BundleOptions
+
+        @Option(help: "Where the port's folder and zip go.")
+        var output = ".build/portmaster"
+
+        @Option(help: "A Swift SDK's destination file, to build for another architecture; LINUXAPPRUNTIME_SWIFT_DESTINATION.")
+        var destination: String?
+
+        @Option(help: "Libraries to bundle; LINUXAPPRUNTIME_PORT_LIBS.")
+        var libraries: String?
+
+        @Option(help: "Fonts to bundle.")
+        var fonts = "/usr/share/fonts/truetype/dejavu"
+
+        @Option(help: "The porter's name, for port.json (repeatable).")
+        var porter: [String] = []
+
+        @Option(help: "port.json's description.")
+        var description: String?
+
+        @Option(help: "A screenshot; the app's icon by default.")
+        var screenshot: String?
+
+        func run() throws {
+            let environment = ProcessInfo.processInfo.environment
+            let destination = destination ?? environment["LINUXAPPRUNTIME_SWIFT_DESTINATION"]
+            // SwiftPM's default build system ignores destination files.
+            let packager = try options.packager(buildArguments: destination.map { ["--build-system", "native", "--destination", $0] } ?? [])
+            var portOptions = PortMasterPort.Options(output: URL(fileURLWithPath: output))
+            portOptions.libraries = (libraries ?? environment["LINUXAPPRUNTIME_PORT_LIBS"]).map { URL(fileURLWithPath: $0) }
+            portOptions.fonts = URL(fileURLWithPath: fonts)
+            portOptions.porters = porter
+            portOptions.description = description
+            portOptions.screenshot = screenshot.map { URL(fileURLWithPath: $0) }
+            if portOptions.libraries == nil {
+                FileHandle.standardError.write(Data("linux-app: warning: no libraries to bundle; handhelds don't have SDL3\n".utf8))
+            }
+            let result = try PortMasterPort(packager: packager, options: portOptions).package()
+            report(result.diagnostics)
+            print(result.directory.path)
+            print(result.zip.path)
+            if let glibc = result.minimumGLIBC {
+                print("min_glibc: \(glibc)")
+            }
         }
     }
 }
