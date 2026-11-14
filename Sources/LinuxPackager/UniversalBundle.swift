@@ -17,6 +17,11 @@ public struct UniversalBundle {
     /// `CFBundleDisplayName`, `CFBundleName`, or the executable.
     public let displayName: String
 
+    /// The name in each of `CFBundleLocalizations`, by desktop locale, from
+    /// `resources/<language>.lproj/Manifest.strings` at `RTDisplayNameKey`
+    /// (AppRuntime's manifest stage writes both).
+    public let localizedDisplayNames: [String: String]
+
     public init(url: URL) throws(PackagerError) {
         self.url = url.standardizedFileURL
         let plist = url.appendingPathComponent("Info.plist")
@@ -32,6 +37,17 @@ public struct UniversalBundle {
             throw PackagerError("\(plist.path): \(error)")
         }
         executable = dictionary["CFBundleExecutable"] as? String ?? ""
+        var names: [String: String] = [:]
+        if let key = dictionary["RTDisplayNameKey"] as? String {
+            for language in dictionary["CFBundleLocalizations"] as? [String] ?? [] {
+                let table = url.appendingPathComponent("resources/\(language).lproj/Manifest.strings")
+                guard let data = FileManager.default.contents(atPath: table.path),
+                      let strings = (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: String],
+                      let name = strings[key] else { continue }
+                names[DesktopEntry.locale(language)] = name
+            }
+        }
+        localizedDisplayNames = names
         displayName = dictionary["CFBundleDisplayName"] as? String
             ?? dictionary["CFBundleName"] as? String
             ?? executable
