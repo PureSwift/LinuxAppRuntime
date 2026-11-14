@@ -1,4 +1,6 @@
 import CSDL3
+import CSDL3TTF
+import Foundation
 import LinuxHost
 import LinuxUI
 
@@ -35,7 +37,7 @@ public final class SDLTextEngine: TextEngine {
     /// Starts SDL3_ttf. False if it can't, or there's no font.
     public func start() -> Bool {
         guard TTF_Init() else {
-            HostLog.error("SDL3_ttf didn't start: \(SDL.error)")
+            HostLog.error("SDL3_ttf didn't start: \(lastSDLError())")
             return false
         }
         guard font(.body) != nil else {
@@ -64,7 +66,7 @@ public final class SDLTextEngine: TextEngine {
             return font
         }
         guard let font = TTF_OpenFont(path, Float(pixels)) else {
-            HostLog.error("can't open \(path): \(SDL.error)")
+            HostLog.error("can't open \(path): \(lastSDLError())")
             return nil
         }
         TTF_SetFontHinting(font, TTF_HINTING_LIGHT)
@@ -103,7 +105,7 @@ public final class SDLTextEngine: TextEngine {
         return result
     }
 
-    // MARK: Fontconfig
+    // MARK: Finding fonts
 
     private func path(for spec: FontSpec) -> String? {
         let key = PathKey(design: spec.design, weight: spec.weight, italic: spec.italic)
@@ -116,35 +118,128 @@ public final class SDLTextEngine: TextEngine {
         case .monospaced: family = "monospace"
         case .default, .rounded: family = "sans-serif"
         }
-        let path = Self.match(family: family, weight: spec.weight, italic: spec.italic)
+        let path = Fontconfig.shared?.match(family: family, weight: spec.weight, italic: spec.italic)
+            ?? FontDirectory.shared?.match(design: spec.design, weight: spec.weight, italic: spec.italic)
         if let path {
             paths[key] = path
         }
         return path
     }
+}
 
-    /// Fontconfig's best match: a file path.
-    static func match(family: String, weight: Int, italic: Bool) -> String? {
-        guard let pattern = FcPatternCreate() else { return nil }
-        defer { FcPatternDestroy(pattern) }
-        _ = FcPatternAddString(pattern, FC_FAMILY, family)
-        _ = FcPatternAddInteger(pattern, FC_WEIGHT, FcWeightFromOpenType(Int32(weight)))
-        _ = FcPatternAddInteger(pattern, FC_SLANT, italic ? FC_SLANT_ITALIC : FC_SLANT_ROMAN)
-        _ = FcPatternAddBool(pattern, FC_SCALABLE, 1)
-        guard FcConfigSubstitute(nil, pattern, FcMatchPattern) != 0 else { return nil }
-        FcDefaultSubstitute(pattern)
-        var result = FcResultNoMatch
-        guard let match = FcFontMatch(nil, pattern, &result) else { return nil }
-        defer { FcPatternDestroy(match) }
-        var file: UnsafeMutablePointer<FcChar8>?
-        guard FcPatternGetString(match, FC_FILE, 0, &file) == FcResultMatch, let file else { return nil }
-        return String(cString: UnsafeRawPointer(file).assumingMemoryBound(to: CChar.self))
+/// fontconfig, loaded at run time: handhelds often don't have it, and then
+/// the host uses `LINUXAPPRUNTIME_FONTS` (`PortMaster.md` §4).
+final class Fontconfig {
+
+    nonisolated(unsafe) static let shared = Fontconfig()
+
+    private typealias Pattern = OpaquePointer
+
+    private let patternCreate: @convention(c) () -> Pattern?
+    private let patternDestroy: @convention(c) (Pattern?) -> Void
+    private let addString: @convention(c) (Pattern?, UnsafePointer<CChar>, UnsafePointer<UInt8>) -> Int32
+    private let addInteger: @convention(c) (Pattern?, UnsafePointer<CChar>, Int32) -> Int32
+    private let addBool: @convention(c) (Pattern?, UnsafePointer<CChar>, Int32) -> Int32
+    private let substitute: @convention(c) (OpaquePointer?, Pattern?, Int32) -> Int32
+    private let defaultSubstitute: @convention(c) (Pattern?) -> Void
+    private let fontMatch: @convention(c) (OpaquePointer?, Pattern?, UnsafeMutablePointer<Int32>) -> Pattern?
+    private let getString: @convention(c) (Pattern?, UnsafePointer<CChar>, Int32, UnsafeMutablePointer<UnsafeMutablePointer<UInt8>?>) -> Int32
+    private let weightFromOpenType: @convention(c) (Int32) -> Int32
+
+    private init?() {
+        guard let library = dlopen("libfontconfig.so.1", RTLD_NOW) else { return nil }
+        func bind<T>(_ name: String, as type: T.Type) -> T? {
+            dlsym(library, name).map { unsafeBitCast($0, to: T.self) }
+        }
+        guard let patternCreate = bind("FcPatternCreate", as: (@convention(c) () -> Pattern?).self),
+              let patternDestroy = bind("FcPatternDestroy", as: (@convention(c) (Pattern?) -> Void).self),
+              let addString = bind("FcPatternAddString", as: (@convention(c) (Pattern?, UnsafePointer<CChar>, UnsafePointer<UInt8>) -> Int32).self),
+              let addInteger = bind("FcPatternAddInteger", as: (@convention(c) (Pattern?, UnsafePointer<CChar>, Int32) -> Int32).self),
+              let addBool = bind("FcPatternAddBool", as: (@convention(c) (Pattern?, UnsafePointer<CChar>, Int32) -> Int32).self),
+              let substitute = bind("FcConfigSubstitute", as: (@convention(c) (OpaquePointer?, Pattern?, Int32) -> Int32).self),
+              let defaultSubstitute = bind("FcDefaultSubstitute", as: (@convention(c) (Pattern?) -> Void).self),
+              let fontMatch = bind("FcFontMatch", as: (@convention(c) (OpaquePointer?, Pattern?, UnsafeMutablePointer<Int32>) -> Pattern?).self),
+              let getString = bind("FcPatternGetString", as: (@convention(c) (Pattern?, UnsafePointer<CChar>, Int32, UnsafeMutablePointer<UnsafeMutablePointer<UInt8>?>) -> Int32).self),
+              let weightFromOpenType = bind("FcWeightFromOpenType", as: (@convention(c) (Int32) -> Int32).self) else {
+            return nil
+        }
+        self.patternCreate = patternCreate
+        self.patternDestroy = patternDestroy
+        self.addString = addString
+        self.addInteger = addInteger
+        self.addBool = addBool
+        self.substitute = substitute
+        self.defaultSubstitute = defaultSubstitute
+        self.fontMatch = fontMatch
+        self.getString = getString
+        self.weightFromOpenType = weightFromOpenType
+    }
+
+    /// fontconfig's best match, a file path; `nil` if it has no fonts.
+    func match(family: String, weight: Int, italic: Bool) -> String? {
+        guard let pattern = patternCreate() else { return nil }
+        defer { patternDestroy(pattern) }
+        _ = family.withCString { name in
+            name.withMemoryRebound(to: UInt8.self, capacity: family.utf8.count + 1) { addString(pattern, "family", $0) }
+        }
+        _ = addInteger(pattern, "weight", weightFromOpenType(Int32(weight)))
+        // FC_SLANT_ITALIC, FC_SLANT_ROMAN.
+        _ = addInteger(pattern, "slant", italic ? 100 : 0)
+        _ = addBool(pattern, "scalable", 1)
+        // FcMatchPattern.
+        guard substitute(nil, pattern, 0) != 0 else { return nil }
+        defaultSubstitute(pattern)
+        var result: Int32 = 0
+        guard let match = fontMatch(nil, pattern, &result) else { return nil }
+        defer { patternDestroy(match) }
+        var file: UnsafeMutablePointer<UInt8>?
+        // FcResultMatch.
+        guard getString(match, "file", 0, &file) == 0, let file else { return nil }
+        return String(cString: file)
     }
 }
 
-/// SDL's error message.
-enum SDL {
-    static var error: String {
-        SDL_GetError().map { String(cString: $0) } ?? ""
+/// The fonts in `LINUXAPPRUNTIME_FONTS`, chosen by their file names:
+/// `Mono`, `Serif`, or neither for sans-serif; `Bold`; `Oblique` or
+/// `Italic`. DejaVu's names follow this.
+final class FontDirectory {
+
+    nonisolated(unsafe) static let shared: FontDirectory? = {
+        guard let path = ProcessInfo.processInfo.environment["LINUXAPPRUNTIME_FONTS"] else { return nil }
+        return FontDirectory(path: path)
+    }()
+
+    let files: [String]
+
+    init?(path: String) {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: path)) ?? []
+        files = names.filter { $0.lowercased().hasSuffix(".ttf") || $0.lowercased().hasSuffix(".otf") }.sorted()
+            .map { path + "/" + $0 }
+        if files.isEmpty { return nil }
     }
+
+    func match(design: FontSpec.Design, weight: Int, italic: Bool) -> String? {
+        func score(_ file: String) -> Int {
+            let name = (file as NSString).lastPathComponent.lowercased()
+            let mono = name.contains("mono"), serif = name.contains("serif") && !name.contains("sans")
+            let bold = name.contains("bold"), slanted = name.contains("oblique") || name.contains("italic")
+            let condensed = name.contains("condensed") || name.contains("extralight")
+            var score = 0
+            switch design {
+            case .monospaced: score += mono ? 8 : 0
+            case .serif: score += serif ? 8 : 0
+            case .default, .rounded: score += !mono && !serif ? 8 : 0
+            }
+            score += bold == (weight >= 600) ? 4 : 0
+            score += slanted == italic ? 2 : 0
+            score += condensed ? 0 : 1
+            return score
+        }
+        return files.max { score($0) < score($1) }
+    }
+}
+
+/// SDL's last error message.
+func lastSDLError() -> String {
+    SDL_GetError().map { String(cString: $0) } ?? ""
 }
