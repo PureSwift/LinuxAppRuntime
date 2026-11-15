@@ -124,6 +124,10 @@ enum Role {
     case back(RenderNode.ID, levels: Int)
     /// Opens a popup menu.
     case menu([PopupItem])
+    /// A `DatePicker`'s pill: opens its popover with these fields.
+    case datePicker(RenderNode.ID, fields: [DateField])
+    /// A popover's − or +: `change` with the stepped value.
+    case dateStep(RenderNode.ID, value: Double)
     /// A row of an open popup menu.
     case popupItem(PopupItem)
     /// A row with swipe actions: they're in its context menu.
