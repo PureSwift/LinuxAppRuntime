@@ -120,12 +120,12 @@ enum TestModule: HostModule {
     // MARK: Built-ins
 
     @Test func permissionsFollowTheDeclaredCapabilities() {
-        LinuxPermissions.declared = [.bluetooth]
-        LinuxPermissions.providers = [.bluetooth: GrantedPermission()]
-        #expect(LinuxPermissions.status(.bluetooth) == PermissionStatus.granted.rawValue)
-        #expect(LinuxPermissions.status(.location) == PermissionStatus.denied.rawValue, "not declared")
-        LinuxPermissions.declared = [.bluetooth, .location]
-        #expect(LinuxPermissions.status(.location) == PermissionStatus.unavailable.rawValue, "no provider")
+        HostPermissions.declared = [.bluetooth]
+        HostPermissions.providers = [.bluetooth: GrantedPermission()]
+        #expect(HostPermissions.status(.bluetooth) == PermissionStatus.granted.rawValue)
+        #expect(HostPermissions.status(.location) == PermissionStatus.denied.rawValue, "not declared")
+        HostPermissions.declared = [.bluetooth, .location]
+        #expect(HostPermissions.status(.location) == PermissionStatus.unavailable.rawValue, "no provider")
     }
 
     @Test func bundleLanguagesAndStrings() throws {
