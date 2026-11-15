@@ -12,11 +12,7 @@ public enum HostContracts {
     nonisolated(unsafe) public static let modules: [any HostModule.Type] = [LinuxUIModule.self, LinuxBluetooth.self]
 
     public static var provided: [String: ContractDescriptor] {
-        var provided: [String: ContractDescriptor] = [:]
-        for descriptor in BuiltinContracts.all + modules.flatMap({ $0.contracts }) {
-            provided[descriptor.name] = descriptor
-        }
-        return provided
+        AppCompatibility.providedContracts(modules)
     }
 
     /// Capabilities some contract here serves.
