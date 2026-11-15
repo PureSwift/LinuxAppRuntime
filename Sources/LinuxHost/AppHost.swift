@@ -3,36 +3,14 @@ import DynamicRuntime
 import Foundation
 import RuntimeABI
 import RuntimeCore
+@_exported import RuntimeHost
 import RuntimeNative
 
-/// The app library's exports: a sealed slice's `rt_main`, `rt_dispatch` and
-/// `rt_finalize`.
-///
-/// ```swift
-/// AppEntryPoints(main: rt_main, dispatch: rt_dispatch, finalize: rt_finalize)
-/// ```
-public struct AppEntryPoints {
-
-    public var main: () -> rt_status
-
-    public var dispatch: NativeGuest.EntryPoints.Dispatch
-
-    public var finalize: NativeGuest.EntryPoints.Finalize
-
-    public init(
-        main: @escaping () -> rt_status,
-        dispatch: NativeGuest.EntryPoints.Dispatch,
-        finalize: NativeGuest.EntryPoints.Finalize
-    ) {
-        self.main = main
-        self.dispatch = dispatch
-        self.finalize = finalize
-    }
-}
-
-/// Starts an app (`Plan.md` §4): checks it against this host, sets up the
-/// runtime, registers the built-ins and the modules it uses, and calls
-/// `rt_main`. Main thread only.
+/// Starts an app (`Plan.md` §4): checks it against this host with
+/// `RuntimeHost`'s `AppCompatibility`, sets up the runtime, registers the
+/// built-ins (`RuntimeHost`'s `Permissions` and `Application`, and
+/// `LinuxBundle`) and the modules it uses, and calls `rt_main`. Main thread
+/// only.
 public final class AppHost {
 
     public let info: AppInfo
@@ -94,34 +72,11 @@ public final class AppHost {
 
     /// Every contract and callback interface this host can register.
     public var providedContracts: [String: ContractDescriptor] {
-        var provided = [String: ContractDescriptor]()
-        for descriptor in BuiltinContracts.all + modules.flatMap({ $0.contracts }) {
-            provided[descriptor.name] = descriptor
-        }
-        return provided
+        AppCompatibility.providedContracts(modules)
     }
 
     private func check() throws(AppHostError) {
-        if info.abiVersion > runtimeABIVersion {
-            throw .incompatible("the app needs rt ABI \(info.abiVersion); this host provides \(runtimeABIVersion)")
-        }
-        let provided = providedContracts
-        var problems = [String]()
-        for contract in info.contracts {
-            guard let descriptor = provided[contract.name] else {
-                problems.append("\(contract.name) isn't implemented by this host")
-                continue
-            }
-            if descriptor.kind != contract.kind {
-                problems.append("\(contract.name) is a different kind of interface on this host")
-            } else if descriptor.version < contract.version {
-                // Methods added later resolve as absent; the guest checks.
-                warnings.append("\(contract.name) is version \(descriptor.version) on this host; the app was built against \(contract.version)")
-            }
-        }
-        if !problems.isEmpty {
-            throw .incompatible(problems.joined(separator: "; "))
-        }
+        warnings += try AppCompatibility.check(info, provided: providedContracts)
     }
 
     // MARK: Built-ins
@@ -131,27 +86,15 @@ public final class AppHost {
         for module in modules {
             providers.merge(module.permissionProviders()) { _, module in module }
         }
-        LinuxPermissions.providers = providers
-        LinuxPermissions.declared = info.capabilities
-        PermissionsProxy.register(LinuxPermissions.self, in: native)
+        HostPermissions.providers = providers
+        HostPermissions.declared = info.capabilities
+        PermissionsProxy.register(HostPermissions.self, in: native)
         PermissionsDelegateProxy.registerInterface(in: native)
         LinuxBundle.info = info
         LinuxBundle.resources = bundlePath.map { $0 + "/resources" }
         AppBundleProxy.register(LinuxBundle.self, in: native)
-        ApplicationProxy.register(LinuxApplication.self, in: native)
+        ApplicationProxy.register(HostApplication.self, in: native)
         ApplicationDelegateProxy.registerInterface(in: native)
-    }
-}
-
-/// Why the host can't run an app.
-public enum AppHostError: Error, Equatable, CustomStringConvertible {
-
-    case incompatible(String)
-
-    public var description: String {
-        switch self {
-        case .incompatible(let reason): "This app can't run on this host: \(reason)"
-        }
     }
 }
 
