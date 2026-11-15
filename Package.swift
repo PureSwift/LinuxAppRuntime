@@ -78,7 +78,7 @@ let package = Package(
 
         .target(
             name: "LinuxHost",
-            dependencies: [runtime("CRuntime"), runtime("RuntimeCore"), runtime("RuntimeNative"), runtime("DynamicRuntime"), runtime("RuntimeABI")],
+            dependencies: [runtime("CRuntime"), runtime("RuntimeCore"), runtime("RuntimeNative"), runtime("DynamicRuntime"), runtime("RuntimeABI"), runtime("RuntimeHost")],
             swiftSettings: host
         ),
 
