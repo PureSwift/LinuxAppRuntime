@@ -85,7 +85,7 @@ the same loop. `MainLoopClock` is the `HostClock`: `CLOCK_MONOTONIC` for
 
 | Module | Contents |
 |---|---|
-| `LinuxHost` | `AppHost` (checks, built-ins, modules, `rt_main`), `AppInfo` (the bundle's `Info.plist` keys), `HostModule`, `MainLoop`, `MainLoopClock`, `Permissions`, `Bundle`, `Application` |
+| `LinuxHost` | `AppHost` (built-ins, modules, `rt_main`), `MainLoop`, `MainLoopClock`, the `Bundle` built-in; over AppRuntime's `RuntimeHost`, which every host shares: `AppInfo` (the bundle's `Info.plist` keys), the compatibility checks, `HostModule`, and the `Permissions` and `Application` built-ins |
 | `LinuxUI` | The player's model, with no SDL: the render store, layout, drawing to a `Canvas`, hit testing, focus and text editing, lazy rows, navigation, presentations. Tested with a recording canvas and a fixed-width text measurer. |
 | `LinuxSDL` | The `Canvas` and text measurer over `SDL_Renderer` and SDL3_ttf, the window, input translation, the SDL main-loop driver, fonts through fontconfig; SDL3 through [PureSwift/SDL](https://github.com/PureSwift/SDL) (`SDL3Swift`, `CSDL3TTF`) |
 | `LinuxBluetooth` | `Central`, `Peripheral`, `Service`, `Characteristic`, `Descriptor`, `Advertisement` over BlueZ |
@@ -258,9 +258,6 @@ connection → `connectionFailed`, …); anything else is `unknown`, and logged.
 
 ## 9. Open questions
 
-- **Sharing with DarwinAppRuntime.** `AppInfo`, `AppHost`'s checks and
-  `HostModule` are the same on both hosts. They could move into AppRuntime
-  (`RuntimeHost`) once a third host needs them.
 - **Fonts.** Text measured by SDL3_ttf differs from Apple's, so layouts
   differ slightly; the IR only promises close layout.
 - **Permissions.** Desktop Linux has no prompts for Bluetooth; Flatpak's
