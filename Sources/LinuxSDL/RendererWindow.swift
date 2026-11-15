@@ -180,13 +180,13 @@ public final class RendererWindow {
         case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
             updateScale()
         case SDL_EVENT_WINDOW_FOCUS_GAINED:
-            LinuxApplication.setState(.active)
+            HostApplication.setState(.active)
         case SDL_EVENT_WINDOW_FOCUS_LOST:
-            LinuxApplication.setState(.inactive)
+            HostApplication.setState(.inactive)
         case SDL_EVENT_WINDOW_MINIMIZED:
-            LinuxApplication.setState(.background)
+            HostApplication.setState(.background)
         case SDL_EVENT_WINDOW_RESTORED:
-            LinuxApplication.setState(.active)
+            HostApplication.setState(.active)
         case SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_EVENT_MOUSE_BUTTON_UP:
             let point = points(event.button.x, event.button.y)
             guard let button = Self.button(event.button.button) else { break }
