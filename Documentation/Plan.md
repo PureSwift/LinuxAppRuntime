@@ -10,8 +10,6 @@ in these ways:
   usual `.background(…).cornerRadius(…)`) and clips the rest square.
 - **Lazy containers** assume rows as tall as the first.
 - **Scroll indicators** show whenever content overflows.
-- **`refresh`** (5) is sent by its number: `RenderEventKind` in AppRuntime's
-  released `DynamicUI` doesn't name it yet.
 - **Searchable** fields in a navigation bar draw no magnifying glass.
 - **Bluetooth** is tested against a fake bus that plays BlueZ's objects and
   signals; it hasn't run against `bluetoothd` and a device.
