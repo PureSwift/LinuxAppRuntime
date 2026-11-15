@@ -135,6 +135,19 @@ public final class RenderStore {
 
     var popup: Popup?
 
+    /// The open `DatePicker` popover.
+    var datePopover: DatePopover?
+
+    /// The calendar dates show in: the local time zone and locale by default.
+    public var calendar: Calendar = {
+        var calendar = Calendar.current
+        calendar.timeZone = TimeZone.current
+        calendar.locale = Locale.current
+        return calendar
+    }() {
+        didSet { setNeedsDisplay() }
+    }
+
     private var rows: [RenderNode.ID: (revision: PropValue?, rows: [Int: RenderNode])] = [:]
 
     public init(textEngine: TextEngine, palette: Palette = Palette(scheme: .light)) {
@@ -198,6 +211,14 @@ public final class RenderStore {
         }
         if let popup {
             overlays.append(layout.placePopup(popup, environment, window: window))
+        }
+        if let datePopover {
+            if let node = node(datePopover.id) {
+                overlays.append(layout.placeDatePopover(datePopover, node, environment, window: window))
+            } else {
+                // The picker went away.
+                self.datePopover = nil
+            }
         }
         let frame = RenderFrame(root: rootBox, overlays: overlays, bounds: window, palette: palette)
         textFieldOrder = Self.textFields(in: frame)
@@ -269,6 +290,19 @@ public final class RenderStore {
     /// A slider's value: the dragged one while it's dragged.
     func sliderValue(_ id: RenderNode.ID, ir: Double) -> Double {
         sliderValues[id] ?? ir
+    }
+
+    /// The node `id`, in the tree or a lazy container's fetched rows.
+    func node(_ id: RenderNode.ID) -> RenderNode? {
+        if let node = root?.node(id) {
+            return node
+        }
+        for cache in rows.values {
+            for row in cache.rows.values {
+                if let node = row.node(id) { return node }
+            }
+        }
+        return nil
     }
 
     // MARK: Lazy rows
