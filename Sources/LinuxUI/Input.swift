@@ -120,9 +120,12 @@ extension RenderStore {
     private func pointerDown(_ point: Point, button: PointerButton) {
         let target = hitTest(point)
         if button == .secondary {
-            // Swipe actions: the context menu of the row under the pointer.
-            if let menu = path(to: point).reversed().lazy.compactMap(\.contextMenu).first, !menu.isEmpty {
-                popup = Popup(anchor: Rect(origin: point, size: .zero), items: menu)
+            // Context menus and swipe actions under the pointer, innermost
+            // first.
+            let menus = path(to: point).reversed().compactMap(\.contextMenu).filter { !$0.isEmpty }
+            if !menus.isEmpty {
+                let items = menus.dropFirst().reduce(menus[0]) { $0 + [.divider] + $1 }
+                popup = Popup(anchor: Rect(origin: point, size: .zero), items: items)
                 setNeedsDisplay()
             }
             return
@@ -265,18 +268,40 @@ extension RenderStore {
 
     // MARK: Scrolling
 
+    /// How far past the top a pull goes before it refreshes.
+    static let pullDistance = 70.0
+
     private func scroll(at point: Point, dx: Double, dy: Double) {
-        for box in path(to: point).reversed() {
+        let path = path(to: point)
+        for (depth, box) in path.enumerated().reversed() {
             guard case .scroll(let id, let content, let viewport)? = box.role else { continue }
             let maxX = max(content.width - viewport.width, 0), maxY = max(content.height - viewport.height, 0)
             let current = scrollOffsets[id] ?? .zero
             let next = Point(x: min(max(current.x + dx, 0), maxX), y: min(max(current.y + dy, 0), maxY))
             if next != current {
+                overscroll = 0
                 scrollOffsets[id] = next
                 setNeedsDisplay()
                 return
             }
+            // At the top and pulled further: refresh, if a Refreshable holds
+            // this list.
+            if dy < 0, current.y == 0,
+               let refreshable = path[..<depth].last(where: { $0.type == "Refreshable" }) {
+                overscroll -= dy
+                if overscroll >= Self.pullDistance {
+                    overscroll = 0
+                    refresh(refreshable.id)
+                }
+                return
+            }
         }
+    }
+
+    /// Asks a `Refreshable` to refresh, unless it already is.
+    func refresh(_ id: RenderNode.ID) {
+        guard root?.node(id)?.props["refreshing"]?.bool != true else { return }
+        send(id, kind: Self.refreshEvent)
     }
 
     // MARK: Text fields
