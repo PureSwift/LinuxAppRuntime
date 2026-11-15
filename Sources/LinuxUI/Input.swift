@@ -312,7 +312,7 @@ extension RenderStore {
     /// Asks a `Refreshable` to refresh, unless it already is.
     func refresh(_ id: RenderNode.ID) {
         guard root?.node(id)?.props["refreshing"]?.bool != true else { return }
-        send(id, kind: Self.refreshEvent)
+        send(id, .refresh)
     }
 
     // MARK: Text fields
