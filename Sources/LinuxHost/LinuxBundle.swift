@@ -1,5 +1,6 @@
 import DynamicRuntime
 import Foundation
+import RuntimeHost
 
 /// The built-in `Bundle` contract (`AppBundle` in Swift): the app's keys
 /// and its localized strings, from the universal bundle's `resources/`
