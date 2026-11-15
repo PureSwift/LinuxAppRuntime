@@ -21,14 +21,7 @@ final class FakeGuest: RendererDelegate {
 
     var rowRequests: [Int] = []
 
-    /// `refresh` events (5), which older `DynamicUI`s don't name.
-    var refreshes: [RenderNode.ID] = []
-
     func event(_ node: [UInt8], kind: Int32, payload: [UInt8]) {
-        if kind == RenderStore.refreshEvent {
-            refreshes.append(try! RenderCodec.decode(id: node))
-            return
-        }
         let event = Event(
             id: try! RenderCodec.decode(id: node),
             kind: RenderEventKind(rawValue: kind)!,
