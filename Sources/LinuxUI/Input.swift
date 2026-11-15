@@ -243,8 +243,19 @@ extension RenderStore {
                 send(id, .change, .bool(false))
             } else {
                 popup = nil
+                datePopover = nil
                 setNeedsDisplay()
             }
+        case .datePicker(let id, let fields):
+            // The same pill again closes it.
+            if let open = datePopover, open.id == id, open.fields == fields {
+                datePopover = nil
+            } else {
+                datePopover = DatePopover(id: id, anchor: lastPressedFrame ?? .zero, fields: fields)
+            }
+            setNeedsDisplay()
+        case .dateStep(let id, let value):
+            send(id, .change, .double(value))
         case .textField, .slider, .scroll, .contextMenu, .blocker:
             break
         }
@@ -475,8 +486,9 @@ extension RenderStore {
 
     /// Escape: the popup, else the topmost sheet or alert.
     private func dismissTopmost() {
-        if popup != nil {
+        if popup != nil || datePopover != nil {
             popup = nil
+            datePopover = nil
             setNeedsDisplay()
             return
         }
