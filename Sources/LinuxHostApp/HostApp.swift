@@ -58,7 +58,7 @@ public enum HostApp {
         }
         if let url = arguments.open {
             MainLoop.shared.post {
-                LinuxApplication.open(url)
+                HostApplication.open(url)
             }
         }
         var script: HostScript?
