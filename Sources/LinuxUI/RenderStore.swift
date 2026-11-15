@@ -333,17 +333,10 @@ public final class RenderStore {
     /// Sends an event to the guest, which updates the tree before this
     /// returns.
     func send(_ id: RenderNode.ID, _ kind: RenderEventKind, _ payload: PropValue? = nil) {
-        send(id, kind: kind.rawValue, payload)
-    }
-
-    /// `refresh` (5), which only newer `DynamicUI`s name.
-    static let refreshEvent: Int32 = 5
-
-    func send(_ id: RenderNode.ID, kind: Int32, _ payload: PropValue? = nil) {
         guard let delegate else { return }
         delegate.event(
             RenderCodec.encode(id: id),
-            kind: kind,
+            kind: kind.rawValue,
             payload: payload.map { RenderCodec.encode(payload: $0) } ?? []
         )
         setNeedsDisplay()
