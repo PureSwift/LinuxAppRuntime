@@ -10,6 +10,8 @@ in these ways:
   usual `.background(…).cornerRadius(…)`) and clips the rest square.
 - **Lazy containers** assume rows as tall as the first.
 - **Scroll indicators** show whenever content overflows.
+- **`refresh`** (5) is sent by its number: `RenderEventKind` in AppRuntime's
+  released `DynamicUI` doesn't name it yet. `DatePicker` isn't drawn yet.
 - **Searchable** fields in a navigation bar draw no magnifying glass.
 - **Bluetooth** is tested against a fake bus that plays BlueZ's objects and
   signals; it hasn't run against `bluetoothd` and a device.
@@ -179,7 +181,9 @@ glyphs in the font, and the rest draw a placeholder.
 | `DisclosureGroup` | Row with a disclosure triangle | `change(bool)` |
 | `NavStack` | Header bar: back button, title, toolbar items | `pop(levels left)` on back, Alt+Left |
 | `Sheet`, `Alert` | Modal card over a dimmed window | `change(false)` on Escape, outside click, or an alert button (after its `tap`) |
-| `Menu`, `SwipeActions` | Popup menu; swipe actions appear in the row's context menu (right click) | the item's `tap` |
+| `Menu`, `SwipeActions`, `ContextMenu` | Popup menu; a view's context menu and its row's swipe actions appear together on a right click | the item's `tap` |
+| `Refreshable` | Scrolling up past the top of its list (wheel, touchpad, D-pad) pulls it; a spinner shows while `refreshing` | `refresh` |
+| `Shape` | Filled or stroked rectangle, rounded rectangle, circle or capsule; ellipses draw as capsules | — |
 | `Link` | Accent text; opens with `xdg-open` | — |
 | `ScrollView`, `List`, `Form` | Wheel and touchpad scrolling, clipped | — |
 
