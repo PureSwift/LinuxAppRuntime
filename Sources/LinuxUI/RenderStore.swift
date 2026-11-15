@@ -122,6 +122,9 @@ public final class RenderStore {
     /// Where the pointer last was: what the arrow keys scroll.
     var pointerLocation: Point?
 
+    /// How far past the top the user has pulled a refreshable list.
+    var overscroll: Double = 0
+
     var pressedFrame: Rect?
 
     /// The frame of the box last released, where its menu opens.
@@ -296,10 +299,17 @@ public final class RenderStore {
     /// Sends an event to the guest, which updates the tree before this
     /// returns.
     func send(_ id: RenderNode.ID, _ kind: RenderEventKind, _ payload: PropValue? = nil) {
+        send(id, kind: kind.rawValue, payload)
+    }
+
+    /// `refresh` (5), which only newer `DynamicUI`s name.
+    static let refreshEvent: Int32 = 5
+
+    func send(_ id: RenderNode.ID, kind: Int32, _ payload: PropValue? = nil) {
         guard let delegate else { return }
         delegate.event(
             RenderCodec.encode(id: id),
-            kind: kind.rawValue,
+            kind: kind,
             payload: payload.map { RenderCodec.encode(payload: $0) } ?? []
         )
         setNeedsDisplay()
