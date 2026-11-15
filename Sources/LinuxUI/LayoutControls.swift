@@ -46,6 +46,8 @@ extension Layout {
             return Size(width: proposal.width ?? 180, height: 6 + (title.map { $0.height + 6 } ?? 0))
         case "Picker":
             return pickerSize(node, proposal, environment)
+        case "DatePicker":
+            return datePickerSize(node, proposal, environment)
         case "DisclosureGroup":
             return disclosureSize(node, proposal, environment)
         default:
@@ -215,6 +217,9 @@ extension Layout {
             return true
         case "Picker":
             placePicker(node, in: rect, environment, box)
+            return true
+        case "DatePicker":
+            placeDatePicker(node, in: rect, environment, box)
             return true
         case "DisclosureGroup":
             placeDisclosure(node, in: rect, environment, box)
