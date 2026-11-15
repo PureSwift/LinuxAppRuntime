@@ -29,7 +29,7 @@ through wasm2c, and the packaged app runs. See the
 
 | Module | |
 |---|---|
-| `LinuxHost` | `AppHost` (checks, built-ins, modules, `rt_main`), `AppInfo`, `MainLoop` and its clock, `Permissions`, `Bundle`, `Application` |
+| `LinuxHost` | `AppHost` (built-ins, modules, `rt_main`), `MainLoop` and its clock, and the `Bundle` built-in, over AppRuntime's shared `RuntimeHost` (`AppInfo`, compatibility checks, `HostModule`, `Permissions`, `Application`) |
 | `LinuxUI` | The player's model without SDL: render store, layout, drawing to a `Canvas`, input, text editing, lazy rows, navigation, presentations |
 | `LinuxSDL` | The window, `SDL_Renderer` canvas, SDL3_ttf text with fontconfig's fonts (or bundled ones), and SDL as the main loop's driver, over [PureSwift/SDL](https://github.com/PureSwift/SDL)'s `SDL3Swift` and `CSDL3TTF` |
 | `LinuxBluetooth` | `Central`, `Peripheral`, `Service`, `Characteristic`, `Descriptor` and `Advertisement` over BlueZ, through `wendylabsinc/dbus` |
