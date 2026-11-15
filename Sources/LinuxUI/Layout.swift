@@ -155,7 +155,7 @@ final class Layout {
             size[along] = proposal[along] ?? 0
             size[environment.stackAxis] = 1
             return size
-        case "Color":
+        case "Color", "Shape":
             return proposal.replacingUnspecified(with: Size(width: 10, height: 10))
         case "VStack", "HStack", "LazyVStack", "LazyHStack", "ZStack":
             if node.count != nil {
@@ -168,7 +168,7 @@ final class Layout {
             return gridSize(node, proposal, environment)
         case "LazyVGrid", "LazyHGrid":
             return lazyGridSize(node, proposal, environment)
-        case "Sheet", "Alert", "Searchable":
+        case "Sheet", "Alert", "Searchable", "Refreshable", "ContextMenu":
             // They stand in for their first child (`RenderIR.md`).
             guard let first = node.children.first else { return .zero }
             return size(first, proposal, environment)
@@ -223,6 +223,15 @@ final class Layout {
             }
         case "Searchable":
             placeSearchable(node, in: rect, environment, box)
+        case "Shape":
+            placeShape(node, in: rect, environment, box)
+        case "Refreshable":
+            placeRefreshable(node, in: rect, environment, box)
+        case "ContextMenu":
+            if let first = node.children.first {
+                box.children.append(place(first, in: rect, environment))
+            }
+            box.contextMenu = menuItems(Array(node.children.dropFirst()))
         default:
             if placeControl(node, in: rect, environment, box) { return }
             if placeList(node, in: rect, environment, box) { return }
