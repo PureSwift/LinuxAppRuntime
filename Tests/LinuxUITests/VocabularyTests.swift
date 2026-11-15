@@ -49,16 +49,16 @@ import Testing
         #expect(store.screen.texts.contains("Row 0"), "it stands in for its list")
         let point = Point(x: 200, y: 300)
         store.handle(.scroll(point, dx: 0, dy: -40), size: window)
-        #expect(guest.refreshes.isEmpty, "not far enough")
+        #expect(guest.events.isEmpty, "not far enough")
         store.handle(.scroll(point, dx: 0, dy: -40), size: window)
-        #expect(guest.refreshes == [1])
+        #expect(guest.events == [.init(id: 1, kind: .refresh)])
 
         // While refreshing: a spinner, and no second refresh.
         store.apply(refreshableList(refreshing: true))
         let spinner = store.screen.root?.overlayOps.contains { if case .circle = $0 { true } else { false } }
         #expect(spinner == true)
         store.handle(.scroll(point, dx: 0, dy: -200), size: window)
-        #expect(guest.refreshes == [1])
+        #expect(guest.events == [.init(id: 1, kind: .refresh)])
     }
 
     @Test func contextMenusJoinSwipeActions() {
