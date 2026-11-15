@@ -176,6 +176,7 @@ extension Layout {
         // Swipe actions stay with the row.
         if let menu = child.contextMenu {
             wrapper.contextMenu = menu
+            child.contextMenu = nil
         }
         wrapper.children.append(child)
         box.children.append(wrapper)
