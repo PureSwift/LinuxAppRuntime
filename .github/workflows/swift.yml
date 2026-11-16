@@ -18,18 +18,26 @@ jobs:
           - arch: arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
-    container: swift:6.4.2
+    # Debian 13, which packages WPE WebKit; Ubuntu 26.04 doesn't.
+    container: swift:6.4.2-trixie
     env:
       # SDL's headless driver, for the window tests.
       SDL_VIDEO_DRIVER: offscreen
+      # WebKit's web processes run without their bubblewrap sandbox, which
+      # can't make namespaces in a container; the tests' pages are their own.
+      WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: 1
     steps:
       - uses: actions/checkout@v4
-      - name: Install SDL3, Cairo, FreeType, fontconfig and Wayland for Cacao, and Mesa for GL
+      - name: Install Cairo, FreeType, fontconfig and Wayland for Cacao, Mesa for GL, and WPE WebKit
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends libsdl3-dev libcairo2-dev libfreetype-dev \
+          apt-get install -y --no-install-recommends cmake ninja-build git libcairo2-dev libfreetype-dev \
             libfontconfig-dev libwayland-dev wayland-protocols fonts-dejavu-core \
-            libegl1 libegl-mesa0 libgles-dev libgl1-mesa-dri
+            libegl1 libegl-mesa0 libgles-dev libgl1-mesa-dri \
+            libwpewebkit-2.0-1 libwpebackend-fdo-1.0-1 libwayland-server0
+      # Debian's SDL is 3.2; PureSwift/SDL needs 3.4.
+      - name: Build SDL3
+        run: Scripts/build-sdl3.sh /usr -DCMAKE_INSTALL_LIBDIR=lib/$(uname -m)-linux-gnu
       - name: Build
         run: swift build --build-tests
       - name: Test

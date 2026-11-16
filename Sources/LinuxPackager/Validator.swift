@@ -2,6 +2,7 @@ import DynamicRuntime
 import Foundation
 import LinuxBluetooth
 import LinuxGraphics
+import LinuxWebKit
 import LinuxHost
 import DynamicUI
 import RuntimeABI
@@ -10,16 +11,19 @@ import RuntimeABI
 public enum HostContracts {
 
     /// The modules `linux-app-host` registers (`HostApp.modules`): the
-    /// player's contracts, without building the player, Bluetooth and
-    /// graphics.
-    nonisolated(unsafe) public static let modules: [any HostModule.Type] = [PlayerContracts.self, LinuxBluetooth.self, LinuxGraphics.self]
+    /// player's contracts, without building the player, Bluetooth,
+    /// graphics and web views.
+    nonisolated(unsafe) public static let modules: [any HostModule.Type] = [
+        PlayerContracts.self, LinuxBluetooth.self, LinuxGraphics.self, LinuxWebKit.self,
+    ]
 
     public static var provided: [String: ContractDescriptor] {
         AppCompatibility.providedContracts(modules)
     }
 
-    /// Capabilities some contract here serves.
-    public static let capabilities: Set<Capability> = [.bluetooth, .graphics]
+    /// Capabilities some contract here serves: `network` is what lets a
+    /// web view's page reach the network.
+    public static let capabilities: Set<Capability> = [.bluetooth, .graphics, .network]
 }
 
 /// How the guest's code gets into the app (`Packager.md` §2).

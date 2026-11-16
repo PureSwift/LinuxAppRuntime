@@ -8,7 +8,9 @@
 #   APPRUNTIME_PATH=~/Developer/AppRuntime Scripts/docker.sh swift build --scratch-path .build/linux
 #
 # LINUXAPPRUNTIME_APP_LIBRARY, a path inside the container, and
-# CACAO_SCREENSHOT_DELAY are passed through.
+# CACAO_SCREENSHOT_DELAY are passed through. WebKit's web processes run
+# without their bubblewrap sandbox, which can't make namespaces in a
+# container.
 set -e
 root=$(cd "$(dirname "$0")/.." && pwd)
 image=linuxappruntime-dev
@@ -29,4 +31,5 @@ exec docker run --rm \
     -v "$root:/src" -w /src \
     -v linuxappruntime-swiftpm:/root/.cache \
     -e LINUXAPPRUNTIME_APP_LIBRARY -e CACAO_SCREENSHOT_DELAY \
+    -e WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 \
     "$@" "$image" bash -c "$command"

@@ -29,6 +29,7 @@ into a Linux program:
   frontend's render IR, on Cacao's SwiftUI for Linux;
 - **Bluetooth** over BlueZ's D-Bus API;
 - **GL surfaces**, OpenGL ES 2.0 over EGL, in the player's views;
+- **web views**, WPE WebKit pages in the player's views;
 - the **packager**, `linux-app` ([Packager.md](Packager.md)).
 
 References like §7.6 are to `Documentation/DynamicRuntime.md` in AppRuntime;
@@ -45,7 +46,7 @@ AppRuntime's contracts.
 | arm64 and x86_64 Linux with glibc (Debian 13, Ubuntu 24.04+) | armv7, musl |
 | Native slices linked into the host | wasm2c (AppRuntime's shim, as on Darwin); WasmKit for development |
 | Wayland and X11 through SDL3; a headless driver for tests | Multiple windows |
-| `Renderer`, Bluetooth `Central` and friends, GL surfaces, the built-ins | Location (GeoClue), Device (UPower, sysfs), Networking (libcurl), Formatting (ICU), Motion (iio-sensor-proxy), NFC (neard) |
+| `Renderer`, Bluetooth `Central` and friends, GL surfaces, web views, the built-ins | Location (GeoClue), Device (UPower, sysfs), Networking (libcurl), Formatting (ICU), Motion (iio-sensor-proxy), NFC (neard) |
 
 ## 2. Process model
 
@@ -56,6 +57,7 @@ AppRuntime's contracts.
 │   ├── MainLoop: timers, jobs from other threads                  │
 │   ├── LinuxBluetooth: BlueZ over D-Bus (NIO threads → MainLoop)  │
 │   ├── LinuxGraphics: GL surfaces, EGL pbuffers read back         │
+│   ├── LinuxWebKit: WPE WebKit pages, frames in shared memory     │
 │   ├── LinuxUI: DarwinUI, render IR → SwiftUI views → events      │
 │   │     └── Cacao: SwiftUI, Silica/Cairo, SDL3 windows and input │
 │   └── libapp.a: the app's sealed linux-arm64 / linux-x86_64 slice│
@@ -89,8 +91,9 @@ timers for `schedule`.
 | `LinuxUI` | The SwiftUI player: DarwinAppRuntime's `DarwinUI`, copied by `Scripts/sync-darwinui.sh`, over Cacao's `SwiftUI` and `Combine` modules; `Host.swift` gives it the logger and bundle it takes from its host |
 | `LinuxBluetooth` | `Central`, `Peripheral`, `Service`, `Characteristic`, `Descriptor`, `Advertisement` over BlueZ |
 | `LinuxGraphics` | `Surface` over EGL and GLES 2.0, loaded at run time; the player's `GLSurface` view shows it (§7) |
+| `LinuxWebKit` | `WebContent` over WPE WebKit, loaded at run time; the player's `WebView` view shows it (§8) |
 | `LinuxHostApp` | `main`: reads the app's keys, starts the host, and runs Cacao's SDL loop with one window showing the guest's first renderer |
-| `LinuxPackager`, `linux-app` | The packager (§9, [Packager.md](Packager.md)) |
+| `LinuxPackager`, `linux-app` | The packager (§10, [Packager.md](Packager.md)) |
 
 The package depends on AppRuntime without its `GuestExports` trait, like
 DarwinAppRuntime, so the slice's `rt_dispatch` and `rt_finalize` are the
@@ -107,7 +110,7 @@ only ones linked (`HostRuntime.md` §8 in DarwinAppRuntime).
 3. `NativeRuntime.shared.bindDirectly()`; set capabilities; set the clock.
 4. Register the built-ins (`Permissions`, `Bundle`, `Application`) and each
    module the app uses (`LinuxUI` for `Renderer`, `LinuxBluetooth`,
-   `LinuxGraphics`).
+   `LinuxGraphics`, `LinuxWebKit`).
 5. Call `rt_main`. When the guest calls `Renderer.make`, the player adds
    its scene; the first tree is there before `rt_main` returns.
 6. Run Cacao's loop until the window closes, the window showing the first
@@ -207,20 +210,90 @@ image:
   window is in the background. Reading back each frame costs a copy; a GL
   backend for Cacao's compositor could show the pbuffer as a texture.
 
-## 8. Testing
+## 8. Web views
+
+`LinuxWebKit` implements `WebContent` (AppRuntime's `WebKit.md`) with WPE
+WebKit, and the player draws `WebView` nodes. It follows Perry's
+(`Sources/PerryUIKit/WPE.swift` there):
+
+- **No WebKit at build time.** The host opens libwpe, WPEBackend-fdo,
+  libwayland-server, `libWPEWebKit-2.0.so.1`, GLib and GObject when a page
+  is first made, locally, so their symbols stand in for no others. Without
+  them a page loads nothing, and fails each load saying so. Debian 13
+  packages WPE 2.48 (`libwpewebkit-2.0-1`, `libwpebackend-fdo-1.0-1`);
+  Ubuntu 26.04 doesn't, so the development image and CI moved to Debian 13.
+- **Frames in shared memory.** WPEBackend-fdo runs in its SHM mode
+  (`wpe_fdo_initialize_shm`), and each page's exportable view backend hands
+  over every frame the web process draws as a `wl_shm` buffer: premultiplied
+  BGRA, turned into RGBA for Cacao's `Image(pixels:)`. WebKit draws on the
+  CPU; there's no GL.
+- **GLib's context** runs on the main loop every 8 ms while there are pages:
+  their signals, script results and frames all come through it.
+- **The contract** maps onto `WebKitWebView`:
+  - `load-changed`, `load-failed` and `load-failed-with-tls-errors` give
+    loading, finishing and failing;
+  - `notify::` on `uri`, `title` and `estimated-load-progress`, and the
+    history after each commit, give the rest;
+  - `uri` changes as soon as a load is asked for, and before a history
+    navigation is decided, so it's reported only once the navigation
+    commits or follows a redirect, as the contract wants;
+  - cancelled and replaced navigations aren't failures.
+- **Errors** come as GErrors and map to `WebError.Code`: WebKit's network
+  and policy errors, GIO's (a timeout is `timedOut`, the rest `network`),
+  the resolver's, and TLS (`security`).
+- **`decide-policy`** asks `shouldNavigate` for each navigation and new
+  window, except the guest's own `load`, `loadHTML` and `loadResource`. A
+  new window loads in the same page. WPE doesn't say which frame a
+  navigation is in, so `isMainFrame` is always true.
+- **Without `network`**:
+  - a remote `load`, or a navigation to a remote URL, fails with
+    `notPermitted` before it starts;
+  - every other request goes through a proxy on a `.invalid` host (RFC
+    2606), which never resolves, so remote subresources don't load.
+- **`loadResource`** loads a `file://` URL in the bundle's `resources/`,
+  refusing paths that leave it.
+- **The view** (`Sources/LinuxUI/HostWebView.swift`):
+  - It gives the page its size in points and the display's scale, and
+    makes it visible while it's on screen. The page stays loaded when the
+    view goes.
+  - A drag is the primary button, and hovering moves the pointer.
+  - A click focuses the page. Keys go to it as XKB keysyms, which WPE turns
+    into text.
+- **The sandbox.** WebKit starts its web and network processes under
+  bubblewrap, which can't make namespaces in a container, so the
+  development image and CI set `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1`
+  for their test pages. The host leaves the sandbox on. Inside a launcher's
+  own sandbox (AppRuntime's §7.8) it's still the open question `WebKit.md`
+  names.
+- **Not yet**:
+  - The wheel: Cacao sends it only to its scroll views. Pages scroll with
+    the arrow keys, Page Up and Page Down, and Space.
+  - `alert`, `confirm` and `prompt`: WebKit's defaults apply, which show
+    nothing.
+  - Permission requests: WebKit denies them by default.
+  - Touches, and buttons other than the primary.
+  - Reading files beside a bundled page only: WebKit's file-URL rules
+    apply.
+
+## 9. Testing
 
 - `LinuxUI`: DarwinUI's tests, on Cacao (§5).
 - `LinuxBluetooth`: the contract against a fake `BlueZBus` that plays
   BlueZ's objects and signals. Runs on macOS and Linux.
 - `LinuxGraphics`: a surface's input order, focus and size, and on Linux
   frames drawn and read back with Mesa's llvmpipe, and a lost context.
+- `LinuxWebKit`: on Linux, in WPE: loading HTML and the events' order,
+  scripts' JSON, navigations asked about and refused, back, bundle
+  resources, a refused connection, remote loads without `network`, frames
+  and their pixels, a click, typing, and a resize. Every WebKit call is made
+  on one thread, which WebKit takes for its main thread.
 - End to end: AppRuntime's `ExampleUI` built as a `linux-arm64` slice,
   linked into `linux-app-host` and run headless with SDL's `offscreen`
   driver, its first frame saved with `CACAO_SCREENSHOT`.
 - Real BlueZ needs hardware: manual runs on a Raspberry Pi or a laptop with
   `bluetoothd`.
 
-## 9. Phases
+## 10. Phases
 
 1. **Host runtime and player**: `LinuxHost`, `LinuxUI`, `LinuxBluetooth`,
    `LinuxHostApp`; `ExampleUI` runs in Docker.
@@ -235,7 +308,7 @@ image:
 4. **Player**: what DarwinUI and Cacao add: Cacao's AT-SPI bridge, input
    replay for end-to-end tests.
 
-## 10. Open questions
+## 11. Open questions
 
 - **Permissions.** Desktop Linux has no prompts for Bluetooth; Flatpak's
   portals cover location and the camera. `Permissions.request` answers from

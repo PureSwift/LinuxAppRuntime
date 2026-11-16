@@ -1,33 +1,11 @@
-// Node types this host draws itself, ahead of DarwinUI: `GLSurface`, a
-// `LinuxSurface`'s frames and input (`Graphics.md`). Scripts/sync-darwinui.sh
-// keeps this file and has NodeView ask `HostNodeViews` before it gives up
-// on a type.
+// `GLSurface` nodes: a `LinuxSurface`'s frames and input (`Graphics.md`).
+// Scripts/sync-darwinui.sh keeps this file.
 import DynamicGraphics
 import DynamicUI
 import Foundation
 import LinuxGraphics
 import LinuxHost
 import SwiftUI
-
-/// The views of node types DarwinUI doesn't know.
-enum HostNodeViews {
-
-    @MainActor
-    static func view(for node: RenderNode, store: RenderStore) -> AnyView? {
-        switch node.type {
-        case "GLSurface":
-            #if os(Linux)
-            let identifier = Int32(clamping: node.props["surface"]?.int ?? 0)
-            return AnyView(GLSurfaceView(identifier: identifier))
-            #else
-            // Apple's SwiftUI, for development: no GL here.
-            return AnyView(Color.black)
-            #endif
-        default:
-            return nil
-        }
-    }
-}
 
 #if os(Linux)
 

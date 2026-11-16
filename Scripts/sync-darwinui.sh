@@ -7,8 +7,9 @@
 #   supplies the logger and bundle DarwinUI uses);
 # - `#if os(macOS)` code, which is for any platform but iOS: Linux is
 #   neither;
-# - NodeView, which asks `HostNodeViews` (HostGLSurface.swift) for a type
-#   it doesn't know before giving up on it: `GLSurface` is this host's.
+# - NodeView, which asks `HostNodeViews` (HostNodeViews.swift) for a type
+#   it doesn't know before giving up on it: `GLSurface` and `WebView` are
+#   this host's.
 #
 # Files named Host*.swift are this host's own, and stay.
 #
