@@ -54,7 +54,7 @@ with this checkout at `/src`:
 Scripts/docker.sh swift test --scratch-path .build/linux
 ```
 
-AppRuntime and Cacao (its `feature/swiftui` branch) come from GitHub.
+AppRuntime and Cacao (its `develop` branch) come from GitHub.
 `APPRUNTIME_PATH` and `CACAO_PATH` point at local checkouts instead.
 `Scripts/sync-darwinui.sh` updates the player from a DarwinAppRuntime
 checkout beside this one.
