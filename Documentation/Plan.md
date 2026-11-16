@@ -28,6 +28,7 @@ into a Linux program:
 - the **SwiftUI player**: DarwinAppRuntime's renderer of the SwiftUI
   frontend's render IR, on Cacao's SwiftUI for Linux;
 - **Bluetooth** over BlueZ's D-Bus API;
+- **GL surfaces**, OpenGL ES 2.0 over EGL, in the player's views;
 - the **packager**, `linux-app` ([Packager.md](Packager.md)).
 
 References like §7.6 are to `Documentation/DynamicRuntime.md` in AppRuntime;
@@ -44,7 +45,7 @@ AppRuntime's contracts.
 | arm64 and x86_64 Linux with glibc (Debian 13, Ubuntu 24.04+) | armv7, musl |
 | Native slices linked into the host | wasm2c (AppRuntime's shim, as on Darwin); WasmKit for development |
 | Wayland and X11 through SDL3; a headless driver for tests | Multiple windows |
-| `Renderer`, Bluetooth `Central` and friends, the built-ins | Location (GeoClue), Device (UPower, sysfs), Networking (libcurl), Formatting (ICU), Motion (iio-sensor-proxy), NFC (neard) |
+| `Renderer`, Bluetooth `Central` and friends, GL surfaces, the built-ins | Location (GeoClue), Device (UPower, sysfs), Networking (libcurl), Formatting (ICU), Motion (iio-sensor-proxy), NFC (neard) |
 
 ## 2. Process model
 
@@ -54,6 +55,7 @@ AppRuntime's contracts.
 │   ├── runtime core: RuntimeCore + RuntimeNative (rt_* symbols)   │
 │   ├── MainLoop: timers, jobs from other threads                  │
 │   ├── LinuxBluetooth: BlueZ over D-Bus (NIO threads → MainLoop)  │
+│   ├── LinuxGraphics: GL surfaces, EGL pbuffers read back         │
 │   ├── LinuxUI: DarwinUI, render IR → SwiftUI views → events      │
 │   │     └── Cacao: SwiftUI, Silica/Cairo, SDL3 windows and input │
 │   └── libapp.a: the app's sealed linux-arm64 / linux-x86_64 slice│
@@ -86,8 +88,9 @@ timers for `schedule`.
 | `LinuxHost` | `AppHost` (built-ins, modules, `rt_main`), `MainLoop`, `MainLoopClock`, the `Bundle` built-in; over AppRuntime's `RuntimeHost`, which every host shares: `AppInfo` (the bundle's `Info.plist` keys), the compatibility checks, `HostModule`, and the `Permissions` and `Application` built-ins |
 | `LinuxUI` | The SwiftUI player: DarwinAppRuntime's `DarwinUI`, copied by `Scripts/sync-darwinui.sh`, over Cacao's `SwiftUI` and `Combine` modules; `Host.swift` gives it the logger and bundle it takes from its host |
 | `LinuxBluetooth` | `Central`, `Peripheral`, `Service`, `Characteristic`, `Descriptor`, `Advertisement` over BlueZ |
+| `LinuxGraphics` | `Surface` over EGL and GLES 2.0, loaded at run time; the player's `GLSurface` view shows it (§7) |
 | `LinuxHostApp` | `main`: reads the app's keys, starts the host, and runs Cacao's SDL loop with one window showing the guest's first renderer |
-| `LinuxPackager`, `linux-app` | The packager (§8, [Packager.md](Packager.md)) |
+| `LinuxPackager`, `linux-app` | The packager (§9, [Packager.md](Packager.md)) |
 
 The package depends on AppRuntime without its `GuestExports` trait, like
 DarwinAppRuntime, so the slice's `rt_dispatch` and `rt_finalize` are the
@@ -103,7 +106,8 @@ only ones linked (`HostRuntime.md` §8 in DarwinAppRuntime).
    contract this host lacks.
 3. `NativeRuntime.shared.bindDirectly()`; set capabilities; set the clock.
 4. Register the built-ins (`Permissions`, `Bundle`, `Application`) and each
-   module the app uses (`LinuxUI` for `Renderer`, `LinuxBluetooth`).
+   module the app uses (`LinuxUI` for `Renderer`, `LinuxBluetooth`,
+   `LinuxGraphics`).
 5. Call `rt_main`. When the guest calls `Renderer.make`, the player adds
    its scene; the first tree is there before `rt_main` returns.
 6. Run Cacao's loop until the window closes, the window showing the first
@@ -167,18 +171,56 @@ errors map to `BluetoothError` (`org.bluez.Error.NotConnected` →
 `NotSupported` → `operationNotSupported`, `InProgress` / `Failed` with a
 connection → `connectionFailed`, …); anything else is `unknown`, and logged.
 
-## 7. Testing
+## 7. GL surfaces
+
+`LinuxGraphics` implements `Surface` (AppRuntime's `Graphics.md`), and the
+player draws `GLSurface` nodes. Cacao composites the window itself, from
+Cairo drawings and images, so a surface is drawn offscreen and shown as an
+image:
+
+- **No GL at build time.** The host opens `libEGL.so.1` and
+  `libGLESv2.so.2` when it starts; without them `graphics` is
+  unavailable. An app that declares `graphics` has `libGLESv2` linked in by
+  the packager, for its own `gl*` calls, which are the same library's.
+- **One context for the app**, GLES 2.0, on Mesa's surfaceless platform
+  where there is one, otherwise the driver's default display. Each surface
+  on screen has a pbuffer of its size in pixels, the default framebuffer
+  the guest draws in. Sharing the context keeps the wasm2c shim's buffer
+  bindings right from one surface to the next; `rt_gl_context_generation`
+  changes when the context is replaced.
+- **Frames**: a timer on the main loop, about 60 times a second while a
+  surface is on screen, makes the context current on its pbuffer, calls
+  `frame`, and reads the pixels back, rows flipped and alpha
+  premultiplied, into Cacao's `Image(pixels:)`. Moves since the last frame
+  go first, one per pointer. If the context is lost, every surface hears
+  `contextLost`, then `contextRestored` with a new one.
+- **The view** (`Sources/LinuxUI/HostGLSurface.swift`, which
+  `sync-darwinui.sh` keeps, hooked into NodeView's unknown types) attaches
+  the surface when it appears, with its size in pixels and `resize` before
+  the first frame, and detaches it when it goes, which cancels pointers in
+  contact and takes focus. A drag is the mouse, pointer 0, with the primary
+  button, and hovering moves it; a click focuses the surface, and keys go
+  to it as USB HID usage IDs from Cacao's key characters, a US layout's
+  positions.
+- **Not yet**: pointer capture (`setPointerCaptured` returns `false`),
+  scrolling, touches as touches, other mouse buttons, and pausing while the
+  window is in the background. Reading back each frame costs a copy; a GL
+  backend for Cacao's compositor could show the pbuffer as a texture.
+
+## 8. Testing
 
 - `LinuxUI`: DarwinUI's tests, on Cacao (§5).
 - `LinuxBluetooth`: the contract against a fake `BlueZBus` that plays
   BlueZ's objects and signals. Runs on macOS and Linux.
+- `LinuxGraphics`: a surface's input order, focus and size, and on Linux
+  frames drawn and read back with Mesa's llvmpipe, and a lost context.
 - End to end: AppRuntime's `ExampleUI` built as a `linux-arm64` slice,
   linked into `linux-app-host` and run headless with SDL's `offscreen`
   driver, its first frame saved with `CACAO_SCREENSHOT`.
 - Real BlueZ needs hardware: manual runs on a Raspberry Pi or a laptop with
   `bluetoothd`.
 
-## 8. Phases
+## 9. Phases
 
 1. **Host runtime and player**: `LinuxHost`, `LinuxUI`, `LinuxBluetooth`,
    `LinuxHostApp`; `ExampleUI` runs in Docker.
@@ -193,7 +235,7 @@ connection → `connectionFailed`, …); anything else is `unknown`, and logged.
 4. **Player**: what DarwinUI and Cacao add: Cacao's AT-SPI bridge, input
    replay for end-to-end tests.
 
-## 9. Open questions
+## 10. Open questions
 
 - **Permissions.** Desktop Linux has no prompts for Bluetooth; Flatpak's
   portals cover location and the camera. `Permissions.request` answers from
