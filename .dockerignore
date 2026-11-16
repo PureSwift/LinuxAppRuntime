@@ -1,0 +1,3 @@
+# The image needs only the SDL build script from this checkout.
+*
+!Scripts/build-sdl3.sh
