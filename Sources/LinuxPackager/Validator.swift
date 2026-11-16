@@ -12,9 +12,9 @@ public enum HostContracts {
 
     /// The modules `linux-app-host` registers (`HostApp.modules`): the
     /// player's contracts, without building the player, Bluetooth,
-    /// graphics and web views.
+    /// graphics, web views and files.
     nonisolated(unsafe) public static let modules: [any HostModule.Type] = [
-        PlayerContracts.self, LinuxBluetooth.self, LinuxGraphics.self, LinuxWebKit.self,
+        PlayerContracts.self, LinuxBluetooth.self, LinuxGraphics.self, LinuxWebKit.self, LinuxFiles.self,
     ]
 
     public static var provided: [String: ContractDescriptor] {
