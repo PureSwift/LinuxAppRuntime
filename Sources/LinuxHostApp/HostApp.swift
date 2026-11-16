@@ -5,6 +5,7 @@ import CacaoSDL
 import Foundation
 import LinuxBluetooth
 import LinuxGraphics
+import LinuxWebKit
 import LinuxUI
 
 /// The app's `main` (`Plan.md` §4): finds the app's bundle, checks and
@@ -24,8 +25,8 @@ import LinuxUI
 public enum HostApp {
 
     /// Every module this host has: the SwiftUI player (DarwinUI, on Cacao),
-    /// Bluetooth, and GL surfaces, which the player shows.
-    public static let modules: [any HostModule.Type] = [DarwinUI.self, LinuxBluetooth.self, LinuxGraphics.self]
+    /// Bluetooth, and GL surfaces and web pages, which the player shows.
+    public static let modules: [any HostModule.Type] = [DarwinUI.self, LinuxBluetooth.self, LinuxGraphics.self, LinuxWebKit.self]
 
     /// The window's title: the app's name.
     nonisolated(unsafe) static var title = ""
