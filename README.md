@@ -5,19 +5,19 @@ apps. An AppRuntime app is guest code only: a universal bundle with
 `App.wasm` and native `libapp.a` slices. This repository turns one into a
 Linux program:
 
-- the **host runtime**: `main`, a main loop that SDL, timers and D-Bus all
-  wake, the runtime core behind `rt.h`, and the built-in contracts;
-- the **SwiftUI player**, which lays out and draws the SwiftUI frontend's
-  render IR with SDL3 and SDL3_ttf, and sends input back;
+- the **host runtime**: `main`, a main loop for timers and D-Bus, the
+  runtime core behind `rt.h`, and the built-in contracts;
+- the **SwiftUI player**: DarwinAppRuntime's renderer of the SwiftUI
+  frontend's render IR, on [Cacao](https://github.com/PureSwift/Cacao),
+  SwiftUI for Linux;
 - **Bluetooth** LE central over BlueZ's D-Bus API;
 - the **packager**, `linux-app`, which turns a universal bundle into an
   installable app.
 
 **Status:** AppRuntime's `ExampleUI`, built as a `linux-arm64` slice, runs
-in the player: text fields, steppers, pickers, alerts, menus, swipe actions
-(as context menus), search, navigation, forms, disclosure groups,
-confirmation dialogs, sheets, tab views and lazy grids all render and reach
-the guest and back, headless under SDL's offscreen driver. The Bluetooth
+in the player on Cacao, headless under SDL's offscreen driver, and the
+player passes DarwinUI's own tests there. PortMaster ports don't build on
+Cacao yet ([PortMaster.md](Documentation/PortMaster.md) §7). The Bluetooth
 contracts are tested against a fake BlueZ and haven't run against real
 hardware. `linux-app` packages `ExampleUI` from its bundle, as a slice or
 through wasm2c, and the packaged app runs. See the
@@ -30,18 +30,19 @@ through wasm2c, and the packaged app runs. See the
 | Module | |
 |---|---|
 | `LinuxHost` | `AppHost` (built-ins, modules, `rt_main`), `MainLoop` and its clock, and the `Bundle` built-in, over AppRuntime's shared `RuntimeHost` (`AppInfo`, compatibility checks, `HostModule`, `Permissions`, `Application`) |
-| `LinuxUI` | The player's model without SDL: render store, layout, drawing to a `Canvas`, input, text editing, lazy rows, navigation, presentations |
-| `LinuxSDL` | The window, `SDL_Renderer` canvas, SDL3_ttf text with fontconfig's fonts (or bundled ones), and SDL as the main loop's driver, over [PureSwift/SDL](https://github.com/PureSwift/SDL)'s `SDL3Swift` and `CSDL3TTF` |
+| `LinuxUI` | The SwiftUI player: DarwinAppRuntime's `DarwinUI`, copied by `Scripts/sync-darwinui.sh`, over Cacao's `SwiftUI` |
 | `LinuxBluetooth` | `Central`, `Peripheral`, `Service`, `Characteristic`, `Descriptor` and `Advertisement` over BlueZ, through `wendylabsinc/dbus` |
-| `LinuxHostApp`, `linux-app-host` | The app's `main` |
+| `LinuxHostApp`, `linux-app-host` | The app's `main`: the host, and Cacao's window and loop |
 | `LinuxPackager`, `linux-app` | The packager: validation, the host build, wasm2c, the install tree, PortMaster ports |
 
 ## Building
 
-Swift 6.4.2 (`.swift-version`), SDL3, SDL3_ttf and fontconfig:
+Swift 6.4.2 (`.swift-version`), and SDL3, Cairo, FreeType, fontconfig and
+Wayland for Cacao:
 
 ```sh
-apt-get install libsdl3-dev libsdl3-ttf-dev libfontconfig-dev fonts-dejavu-core
+apt-get install libsdl3-dev libcairo2-dev libfreetype-dev libfontconfig-dev \
+    libwayland-dev wayland-protocols fonts-dejavu-core
 swift build
 swift test
 ```
@@ -53,8 +54,10 @@ with this checkout at `/src`:
 Scripts/docker.sh swift test --scratch-path .build/linux
 ```
 
-AppRuntime and PureSwift/SDL come from GitHub. `APPRUNTIME_PATH` and
-`SDL_PATH` point at local checkouts instead.
+AppRuntime and Cacao (its `feature/swiftui` branch) come from GitHub.
+`APPRUNTIME_PATH` and `CACAO_PATH` point at local checkouts instead.
+`Scripts/sync-darwinui.sh` updates the player from a DarwinAppRuntime
+checkout beside this one.
 
 ## Packaging an app
 
@@ -84,16 +87,15 @@ which needs WABT (`apt install wabt`). The packaged program takes:
 
 | Argument | |
 |---|---|
-| `--script FILE` | Replays input and takes screenshots (`Scripts/ExampleUI.script`) |
 | `--open URL` | A URL for the app to open |
 | `--bundle App.app` | Another bundle's keys; `App.app` next to the program by default |
 
 `Scripts/run-app.sh` links a bundle's slice into `linux-app-host` and runs it
-in Docker, headless:
+in Docker, headless, saving its first frame:
 
 ```sh
 mkdir -p .build/shots
-Scripts/run-app.sh .build/guest/org.pureswift.ExampleUI.app --script /src/Scripts/ExampleUI.script
+Scripts/run-app.sh .build/guest/org.pureswift.ExampleUI.app .build/shots/ExampleUI.png
 ```
 
 ## PortMaster
@@ -101,11 +103,13 @@ Scripts/run-app.sh .build/guest/org.pureswift.ExampleUI.app --script /src/Script
 `linux-app portmaster` makes a [PortMaster](https://portmaster.games) port
 for aarch64 and armhf handhelds: the host built for their older glibc, SDL3
 built for them, a launcher, gamepad controls and the catalogue's metadata
-([design](Documentation/PortMaster.md)). In Docker:
+([design](Documentation/PortMaster.md)). Ports don't build on Cacao yet:
+their images need Cairo built for old glibc, and Cacao needs the handheld
+options the earlier player had (§7 there). In Docker:
 
 ```sh
 Scripts/portmaster.sh build .build/guest/org.pureswift.ExampleUI.app all --porter "Your Name"
-Scripts/portmaster.sh test aarch64 /src/Scripts/ExampleUI-handheld.script
+Scripts/portmaster.sh test aarch64
 ```
 
 The bundle needs `linux-arm64` and `linux-armv7` slices (`guest.py bundle
@@ -115,12 +119,7 @@ The bundle needs `linux-arm64` and `linux-armv7` slices (`guest.py bundle
 
 | Variable | |
 |---|---|
-| `LINUXAPPRUNTIME_WINDOW_SIZE` | The window's size in points, `WIDTHxHEIGHT`; 420x760 by default |
-| `LINUXAPPRUNTIME_APPEARANCE` | `light` or `dark`; the system's by default |
 | `LINUXAPPRUNTIME_DEBUG` | `1` logs the host's debug messages |
-| `LINUXAPPRUNTIME_FULLSCREEN` | `1`: one fullscreen window |
-| `LINUXAPPRUNTIME_SCALE` | Pixels per point beyond the display's density |
-| `LINUXAPPRUNTIME_CURSOR` | `1`: draw the pointer, for screens without one |
-| `LINUXAPPRUNTIME_FONTS` | A directory of fonts, for systems without fontconfig |
-| `LINUXAPPRUNTIME_SCRIPT` | A script, as `--script` |
+| `CACAO_SCREENSHOT` | Saves the first frame to a PNG and quits |
+| `CACAO_SHOW_STATISTICS` | `1` shows Cacao's frame times |
 | `SDL_VIDEO_DRIVER` | `wayland`, `x11`, `kmsdrm`, or `offscreen` for no display |
