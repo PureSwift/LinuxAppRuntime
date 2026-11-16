@@ -1,12 +1,14 @@
 # Linux environment for building and testing the host: Swift 6.4.2, SDL3,
-# Cairo, FreeType, fontconfig and Wayland for Cacao, a font, Python
-# for AppRuntime's scripts, and WABT for the packager's wasm2c engine.
+# Cairo, FreeType, fontconfig and Wayland for Cacao, a font, Mesa's EGL and
+# GLES 2.0 for GL surfaces (llvmpipe without a GPU), Python for AppRuntime's
+# scripts, and WABT for the packager's wasm2c engine.
 FROM swift:6.4.2
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         libsdl3-dev libsdl3-ttf-dev libfontconfig-dev fonts-dejavu-core \
         libcairo2-dev libfreetype-dev libwayland-dev wayland-protocols \
+        libegl1 libegl-mesa0 libgles-dev libgl1-mesa-dri \
         pkgconf python3 wabt curl ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 

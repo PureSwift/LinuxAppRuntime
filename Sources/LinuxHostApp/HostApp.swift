@@ -4,6 +4,7 @@ import CLinuxHost
 import CacaoSDL
 import Foundation
 import LinuxBluetooth
+import LinuxGraphics
 import LinuxUI
 
 /// The app's `main` (`Plan.md` §4): finds the app's bundle, checks and
@@ -22,9 +23,9 @@ import LinuxUI
 /// Cacao's `CACAO_SCREENSHOT=path.png` saves the first frame and quits.
 public enum HostApp {
 
-    /// Every module this host has: the SwiftUI player (DarwinUI, on Cacao)
-    /// and Bluetooth.
-    public static let modules: [any HostModule.Type] = [DarwinUI.self, LinuxBluetooth.self]
+    /// Every module this host has: the SwiftUI player (DarwinUI, on Cacao),
+    /// Bluetooth, and GL surfaces, which the player shows.
+    public static let modules: [any HostModule.Type] = [DarwinUI.self, LinuxBluetooth.self, LinuxGraphics.self]
 
     /// The window's title: the app's name.
     nonisolated(unsafe) static var title = ""

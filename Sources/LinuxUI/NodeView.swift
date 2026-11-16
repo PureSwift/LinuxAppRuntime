@@ -222,6 +222,9 @@ struct NodeView: View {
             return AnyView(LevelContent(level: model, store: store))
 
         default:
+            if let view = HostNodeViews.view(for: node, store: store) {
+                return view
+            }
             UnknownTypes.log(node.type)
             return AnyView(EmptyView())
         }

@@ -1,7 +1,9 @@
 #!/bin/sh
 # Builds linux-app-host linked with a universal bundle's Linux slice and runs
 # it in the development image, headless (SDL's offscreen driver), saving its
-# first frame to SCREENSHOT (inside this checkout) and quitting. The bundle
+# first frame to SCREENSHOT (inside this checkout) and quitting; with
+# CACAO_SCREENSHOT_DELAY=seconds, the first after that, as for a GL surface,
+# whose frames come after the window's first. The bundle
 # must be inside this checkout, such as .build/guest/<id>.app from
 # AppRuntime's `guest.py bundle --target linux-arm64 --output .build/guest`.
 #

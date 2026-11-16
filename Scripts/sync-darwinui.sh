@@ -6,7 +6,11 @@
 # - `import DarwinHost`, which is `LinuxHost` here (LinuxUI's Host.swift
 #   supplies the logger and bundle DarwinUI uses);
 # - `#if os(macOS)` code, which is for any platform but iOS: Linux is
-#   neither.
+#   neither;
+# - NodeView, which asks `HostNodeViews` (HostGLSurface.swift) for a type
+#   it doesn't know before giving up on it: `GLSurface` is this host's.
+#
+# Files named Host*.swift are this host's own, and stay.
 #
 # RenderingTests hosts views in an NSHostingView; LinuxUI's own hosts them in
 # a Cacao view graph, as Cacao's Compatibility/DarwinUI does. One test is
@@ -19,12 +23,15 @@ cd "$(dirname "$0")/.."
 source=${DARWIN_APP_RUNTIME_PATH:-../DarwinAppRuntime}
 revision=$(git -C "$source" rev-parse --short HEAD)
 mkdir -p Sources/LinuxUI Tests/LinuxUITests
-find Sources/LinuxUI -name '*.swift' ! -name 'Host.swift' -delete
+find Sources/LinuxUI -name '*.swift' ! -name 'Host*.swift' -delete
 find Tests/LinuxUITests -name '*.swift' ! -name 'RenderingTests.swift' -delete
 for file in "$source"/Sources/DarwinUI/*.swift; do
     sed -e 's/^import DarwinHost$/import LinuxHost/' -e 's/^#if os(macOS)$/#if !os(iOS)/' \
         -e 's/^@testable import DarwinUI$/@testable import LinuxUI/' "$file" > "Sources/LinuxUI/$(basename "$file")"
 done
+perl -0pi -e 's/(\n        default:\n)(            UnknownTypes\.log\(node\.type\)\n)/$1            if let view = HostNodeViews.view(for: node, store: store) {\n                return view\n            }\n$2/' \
+    Sources/LinuxUI/NodeView.swift
+grep -q 'HostNodeViews.view' Sources/LinuxUI/NodeView.swift || { echo "NodeView no longer has the default case to hook" >&2; exit 1; }
 for file in "$source"/Tests/DarwinUITests/*.swift; do
     case $(basename "$file") in RenderingTests.swift) continue ;; esac
     # On Linux, Swift Testing's main-actor tests don't run on the thread

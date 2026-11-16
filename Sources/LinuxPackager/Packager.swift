@@ -91,7 +91,8 @@ public struct Packager {
     func buildHost(library: URL) throws(PackagerError) -> URL {
         let directory = work.appendingPathComponent("host")
         let host = HostPackage(directory: directory, hostPackage: options.hostPackage,
-                               executable: bundle.executable, library: try HostPackage.stage(library, in: directory))
+                               executable: bundle.executable, library: try HostPackage.stage(library, in: directory),
+                               linksGL: bundle.info.capabilities.contains(.graphics))
         return try host.build(configuration: options.configuration, staticSwift: options.staticSwift,
                               extraArguments: options.buildArguments, runner: runner)
     }

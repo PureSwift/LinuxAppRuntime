@@ -14,8 +14,8 @@ import PackageDescription
 ///   `CACAO_PATH` likewise for PureSwift/Cacao.
 /// - `LINUXAPPRUNTIME_APP_LIBRARY`: an app's `libapp.a` (a `linux-arm64` or
 ///   `linux-x86_64` slice from `guest.py slice`), which `linux-app-host`
-///   links. Without it, `linux-app-host` builds without an app and says so
-///   when run.
+///   links, with `libGLESv2` if the app calls GL. Without it,
+///   `linux-app-host` builds without an app and says so when run.
 let environment = ProcessInfo.processInfo.environment
 
 let appRuntime: Package.Dependency = {
@@ -70,6 +70,7 @@ let package = Package(
         .library(name: "LinuxHost", targets: ["LinuxHost"]),
         .library(name: "LinuxUI", targets: ["LinuxUI"]),
         .library(name: "LinuxBluetooth", targets: ["LinuxBluetooth"]),
+        .library(name: "LinuxGraphics", targets: ["LinuxGraphics"]),
         .library(name: "LinuxHostApp", targets: ["LinuxHostApp"]),
         .executable(name: "linux-app-host", targets: ["LinuxAppHost"]),
         .executable(name: "linux-app", targets: ["LinuxAppTool"]),
@@ -100,7 +101,7 @@ let package = Package(
         // over Cacao's SwiftUI.
         .target(
             name: "LinuxUI",
-            dependencies: ["LinuxHost", runtime("DynamicUI"), runtime("DynamicRuntime"), runtime("RuntimeNative")] + swiftUI,
+            dependencies: ["LinuxHost", "LinuxGraphics", runtime("DynamicUI"), runtime("DynamicRuntime"), runtime("RuntimeNative")] + swiftUI,
             exclude: ["DARWINUI_REVISION"],
             swiftSettings: host
         ),
@@ -117,13 +118,22 @@ let package = Package(
             swiftSettings: host
         ),
 
+        // MARK: - Graphics
+
+        // GL surfaces over EGL, loaded at run time: the host links no GL.
+        .target(
+            name: "LinuxGraphics",
+            dependencies: ["LinuxHost", runtime("DynamicGraphics"), runtime("DynamicRuntime"), runtime("RuntimeABI")],
+            swiftSettings: host
+        ),
+
         // MARK: - App
 
         // libc functions app slices need that older glibc lacks.
         .target(name: "CLinuxHost"),
         .target(
             name: "LinuxHostApp",
-            dependencies: ["LinuxHost", "LinuxUI", "LinuxBluetooth", "CLinuxHost", runtime("CRuntime"),
+            dependencies: ["LinuxHost", "LinuxUI", "LinuxBluetooth", "LinuxGraphics", "CLinuxHost", runtime("CRuntime"),
                            .product(name: "CacaoSDL", package: "Cacao")],
             swiftSettings: host
         ),
@@ -131,7 +141,11 @@ let package = Package(
             name: "LinuxAppHost",
             dependencies: ["LinuxHostApp"],
             swiftSettings: host + (appLibrary != nil ? [.define("APP_LINKED")] : []),
-            linkerSettings: appLibrary.map { [.unsafeFlags([$0])] } ?? []
+            // The app's own `gl*` calls are libGLESv2's; it's needed only if
+            // it makes them.
+            linkerSettings: appLibrary.map {
+                [.unsafeFlags([$0, "-Xlinker", "--push-state", "-Xlinker", "--as-needed", "-lGLESv2", "-Xlinker", "--pop-state"])]
+            } ?? []
         ),
 
         // MARK: - Packager
@@ -141,7 +155,7 @@ let package = Package(
         // doesn't build Cacao.
         .target(
             name: "LinuxPackager",
-            dependencies: ["LinuxHost", "LinuxBluetooth", runtime("DynamicUI"), .product(name: "Crypto", package: "swift-crypto")]
+            dependencies: ["LinuxHost", "LinuxBluetooth", "LinuxGraphics", runtime("DynamicUI"), .product(name: "Crypto", package: "swift-crypto")]
         ),
         .executableTarget(
             name: "LinuxAppTool",
@@ -157,6 +171,7 @@ let package = Package(
             swiftSettings: host
         ),
         .testTarget(name: "LinuxBluetoothTests", dependencies: ["LinuxBluetooth"], swiftSettings: host),
+        .testTarget(name: "LinuxGraphicsTests", dependencies: ["LinuxGraphics", runtime("DynamicGraphics")], swiftSettings: host),
         .testTarget(name: "LinuxPackagerTests", dependencies: ["LinuxPackager", "LinuxHostApp"]),
     ]
 )

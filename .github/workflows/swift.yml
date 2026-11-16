@@ -24,11 +24,12 @@ jobs:
       SDL_VIDEO_DRIVER: offscreen
     steps:
       - uses: actions/checkout@v4
-      - name: Install SDL3, Cairo, FreeType, fontconfig and Wayland for Cacao
+      - name: Install SDL3, Cairo, FreeType, fontconfig and Wayland for Cacao, and Mesa for GL
         run: |
           apt-get update
           apt-get install -y --no-install-recommends libsdl3-dev libcairo2-dev libfreetype-dev \
-            libfontconfig-dev libwayland-dev wayland-protocols fonts-dejavu-core
+            libfontconfig-dev libwayland-dev wayland-protocols fonts-dejavu-core \
+            libegl1 libegl-mesa0 libgles-dev libgl1-mesa-dri
       - name: Build
         run: swift build --build-tests
       - name: Test
