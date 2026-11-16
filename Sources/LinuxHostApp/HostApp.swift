@@ -25,8 +25,11 @@ import LinuxUI
 public enum HostApp {
 
     /// Every module this host has: the SwiftUI player (DarwinUI, on Cacao),
-    /// Bluetooth, and GL surfaces and web pages, which the player shows.
-    public static let modules: [any HostModule.Type] = [DarwinUI.self, LinuxBluetooth.self, LinuxGraphics.self, LinuxWebKit.self]
+    /// Bluetooth, GL surfaces and web pages, which the player shows, and
+    /// the app's files.
+    public static let modules: [any HostModule.Type] = [
+        DarwinUI.self, LinuxBluetooth.self, LinuxGraphics.self, LinuxWebKit.self, LinuxFiles.self,
+    ]
 
     /// The window's title: the app's name.
     nonisolated(unsafe) static var title = ""
