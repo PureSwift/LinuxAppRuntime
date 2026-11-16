@@ -31,7 +31,7 @@ let cacao: Package.Dependency = {
     if let path = environment["CACAO_PATH"] {
         return .package(name: "Cacao", path: path)
     }
-    return .package(url: "https://github.com/PureSwift/Cacao.git", branch: "feature/swiftui")
+    return .package(url: "https://github.com/PureSwift/Cacao.git", branch: "develop")
 }()
 
 /// The player is DarwinAppRuntime's SwiftUI renderer: on Linux its
