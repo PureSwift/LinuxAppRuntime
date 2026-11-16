@@ -2,14 +2,15 @@ import DynamicRuntime
 import Foundation
 import LinuxBluetooth
 import LinuxHost
-import LinuxUI
+import DynamicUI
 import RuntimeABI
 
 /// What this host implements: the built-ins and its modules' contracts.
 public enum HostContracts {
 
-    /// The modules `linux-app-host` registers (`HostApp.modules`).
-    nonisolated(unsafe) public static let modules: [any HostModule.Type] = [LinuxUIModule.self, LinuxBluetooth.self]
+    /// The modules `linux-app-host` registers (`HostApp.modules`): the
+    /// player's contracts, without building the player, and Bluetooth.
+    nonisolated(unsafe) public static let modules: [any HostModule.Type] = [PlayerContracts.self, LinuxBluetooth.self]
 
     public static var provided: [String: ContractDescriptor] {
         AppCompatibility.providedContracts(modules)
@@ -162,4 +163,15 @@ public enum SliceInspector {
         }
         return machines
     }
+}
+
+/// The SwiftUI player's contracts (`LinuxUI`'s `DarwinUI` module), as the
+/// packager checks against them: the same descriptors, without Cacao.
+public enum PlayerContracts: HostModule {
+
+    public static var contracts: [ContractDescriptor] {
+        [RendererProxy.descriptor, RendererDelegateProxy.descriptor]
+    }
+
+    public static func register(in registrar: some ContractRegistrar) { }
 }
