@@ -2,17 +2,17 @@
 # Builds and tests PortMaster ports (Documentation/PortMaster.md).
 #
 #   Scripts/portmaster.sh build BUNDLE [aarch64|armhf|all] [linux-app portmaster options …]
-#   Scripts/portmaster.sh test [aarch64|armhf] [SCRIPT]
+#   Scripts/portmaster.sh test [aarch64|armhf] [SCREENSHOT]
 #
 # `build` runs `linux-app portmaster` in Docker/portmaster-<arch>.Dockerfile's
 # image, building the image first if needed; ports go to .build/portmaster.
 # BUNDLE must be inside this checkout. `test` runs the built port as
 # PortMaster would, with a stand-in control.txt, in Ubuntu 22.04 (armhf under
-# emulation), headless; SCRIPT (inside this
-# checkout) drives it, and screenshots go where it says, under /src.
+# emulation), headless, saving its first frame to SCREENSHOT (a path under
+# /src, this checkout) if given.
 set -e
 root=$(cd "$(dirname "$0")/.." && pwd)
-command=${1:?usage: Scripts/portmaster.sh build BUNDLE [arch] … | test [arch] [SCRIPT]}
+command=${1:?usage: Scripts/portmaster.sh build BUNDLE [arch] … | test [arch] [SCREENSHOT]}
 shift
 
 image() {
@@ -53,7 +53,7 @@ build)
     ;;
 test)
     arches=$(architectures "${1:-aarch64}")
-    script=${2:-}
+    screenshot=${2:-}
     for arch in $arches; do
         case $arch in
             aarch64) platform=linux/arm64 distribution=ubuntu:22.04 ;;
@@ -67,7 +67,7 @@ test)
         docker run --rm --platform "$platform" \
             -v "$root:/src" -v "$port/$name:/roms/ports/$name" -v "$launcher:/roms/ports/$(basename "$launcher")" \
             -v "$root/Scripts/portmaster-control.txt:/roms/ports/PortMaster/control.txt" \
-            -e DEVICE_ARCH=$arch -e LINUXAPPRUNTIME_SCRIPT="$script" \
+            -e DEVICE_ARCH=$arch -e CACAO_SCREENSHOT="$screenshot" \
             "$distribution" bash "/roms/ports/$(basename "$launcher")"
         # The launcher ends with pm_finish, so its status says nothing: the
         # log does.
