@@ -1,28 +1,33 @@
 @_exported import CRuntime
-import CLinuxHost
 @_exported import LinuxHost
+import CLinuxHost
+import CacaoSDL
 import Foundation
 import LinuxBluetooth
-import LinuxSDL
 import LinuxUI
 
-/// The app's `main` (`Plan.md` §4): finds the app's bundle, starts SDL,
-/// checks and prepares the app, calls `rt_main`, and runs the main loop.
+/// The app's `main` (`Plan.md` §4): finds the app's bundle, checks and
+/// prepares the app, calls `rt_main`, and runs Cacao's main loop with a
+/// window showing the guest's renderer.
 ///
 /// ```
-/// linux-app-host [--bundle App.app] [--open URL] [--script FILE]
+/// linux-app-host [--bundle App.app] [--open URL]
 /// ```
 ///
 /// - `--bundle`: the universal bundle whose `Info.plist` describes the app
 ///   linked in; by default `App.app` next to the executable, or
 ///   `LINUXAPPRUNTIME_BUNDLE`.
 /// - `--open`: a URL for the app to open once it started.
-/// - `--script`: input to replay and screenshots to take (`HostScript`); or
-///   `LINUXAPPRUNTIME_SCRIPT`.
+///
+/// Cacao's `CACAO_SCREENSHOT=path.png` saves the first frame and quits.
 public enum HostApp {
 
-    /// Every module this host has.
-    public static let modules: [any HostModule.Type] = [LinuxUIModule.self, LinuxBluetooth.self]
+    /// Every module this host has: the SwiftUI player (DarwinUI, on Cacao)
+    /// and Bluetooth.
+    public static let modules: [any HostModule.Type] = [DarwinUI.self, LinuxBluetooth.self]
+
+    /// The window's title: the app's name.
+    nonisolated(unsafe) static var title = ""
 
     public static func main(_ entry: AppEntryPoints?) -> Never {
         let arguments = Arguments(CommandLine.arguments)
@@ -39,11 +44,11 @@ public enum HostApp {
             fail("\(bundle): \(error)")
         }
 
-        if info.contractNames.contains(LinuxUIModule.contracts[0].name) {
-            guard let sdl = SDLApp.start(title: info.name, identifier: info.identifier, version: info.version) else {
-                fail("the app has a user interface, and SDL can't show it")
-            }
-            LinuxUIModule.presenter = sdl
+        // Cacao's loop drains the main queue every turn; the host's own
+        // loop runs its jobs and timers there.
+        let ui = info.contractNames.contains(DarwinUI.contracts[0].name)
+        if ui {
+            MainLoop.shared.runsOnMainQueue = true
         }
 
         let host = AppHost(info: info, modules: modules, bundlePath: bundle)
@@ -61,22 +66,16 @@ public enum HostApp {
                 HostApplication.open(url)
             }
         }
-        var script: HostScript?
-        // A script from the environment too, for launchers that don't pass
-        // arguments through (`Scripts/portmaster.sh test`).
-        if let path = arguments.script ?? ProcessInfo.processInfo.environment["LINUXAPPRUNTIME_SCRIPT"].flatMap({ $0.isEmpty ? nil : $0 }) {
-            do {
-                script = try HostScript(contentsOf: path)
-            } catch {
-                fail("\(path): \(error)")
-            }
-            script?.start()
+        guard ui else {
+            HostLog.debug("the app has no user interface; running until interrupted")
+            MainLoop.shared.run()
+            exit(0)
         }
-        if SDLApp.shared?.windows.isEmpty != false, script == nil {
-            HostLog.debug("the app has no window; running until interrupted")
+        title = info.name
+        MainActor.assumeIsolated {
+            SDLHost.run(HostScene())
         }
-        MainLoop.shared.run()
-        exit(script?.failed == true ? 1 : 0)
+        exit(0)
     }
 
     static func fail(_ message: String) -> Never {
@@ -97,7 +96,6 @@ public enum HostApp {
     struct Arguments {
         var bundle: String?
         var open: String?
-        var script: String?
 
         init(_ arguments: [String]) {
             var iterator = arguments.dropFirst().makeIterator()
@@ -105,10 +103,35 @@ public enum HostApp {
                 switch argument {
                 case "--bundle": bundle = iterator.next()
                 case "--open": open = iterator.next()
-                case "--script": script = iterator.next()
                 default: HostLog.warning("ignoring \(argument)")
                 }
             }
+        }
+    }
+}
+
+/// The app's one window.
+struct HostScene: App {
+
+    var body: some Scene {
+        WindowGroup(HostApp.title) {
+            HostRootView()
+        }
+    }
+}
+
+/// The window's content: the first renderer the guest made and still holds,
+/// as on Darwin (`HostRuntime.md` §4).
+struct HostRootView: View {
+
+    @ObservedObject private var scenes = RendererScenes.shared
+
+    var body: some View {
+        if let scene = scenes.scenes.first {
+            RendererView(scene: scene)
+                .id(scene.id)
+        } else {
+            Color.clear
         }
     }
 }
