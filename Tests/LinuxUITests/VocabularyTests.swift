@@ -1,139 +1,263 @@
 import DynamicUI
-import Foundation
+import SwiftUI
 import Testing
 @testable import LinuxUI
 
-/// Shapes, pull to refresh, context menus and date pickers.
-@Suite struct VocabularyTests {
+/// Pickers, tab views, grids, sheets and alerts (`SwiftUIRenderer.md` §3,
+/// §6).
+@MainActor
+@Suite("Vocabulary")
+struct VocabularyTests {
 
-    func shape(_ props: [String: PropValue]) -> RenderNode {
-        RenderNode("Shape", id: 2, props: props, modifiers: [ModifierNode("frame", ["width": 40.0, "height": 20.0])])
+    static var screen: RenderNode {
+        RenderNode("VStack", id: 1, children: [
+            RenderNode("Picker", id: 2, props: ["title": "Flavor", "selection": 1], children: [text(3, "Vanilla"), text(4, "Chocolate")]),
+            RenderNode("Picker", id: 5, props: ["title": "None"], children: [text(6, "Only")]),
+            RenderNode("TabView", id: 7, props: ["selection": 0], children: [
+                RenderNode("Tab", id: 8, props: ["title": "One"], children: [text(9, "First")]),
+                RenderNode("Tab", id: 10, props: ["title": "Two"], children: [text(11, "Second")]),
+            ]),
+            RenderNode("Sheet", id: 12, props: ["isPresented": true, "style": "sheet"], children: [text(13, "Anchor"), text(14, "Content")]),
+            RenderNode("Alert", id: 15, props: ["title": "Sure?", "isPresented": false], children: [
+                RenderNode("Button", id: 16, children: [text(17, "Anchor")]),
+            ]),
+        ])
     }
 
-    func ops(_ node: RenderNode) throws -> [LayoutBox.Op] {
-        try #require(makeStore(node).0.screen.root).ops
+    @Test func selectionsAreControlValues() throws {
+        let (renderer, delegate) = makeRenderer()
+        renderer.apply(Self.screen)
+        let store = renderer.store
+        let picker = try #require(renderer.model(2))
+        #expect(picker.value == .int(1))
+        #expect(try #require(renderer.model(5)).value == .int(-1), "no selection")
+
+        let selection = selectionBinding(picker, store)
+        #expect(selection.wrappedValue == 1)
+        selection.wrappedValue = 0
+        #expect(selection.wrappedValue == 0, "shown before the guest answers")
+
+        let tabs = selectionBinding(try #require(renderer.model(7)), store)
+        tabs.wrappedValue = 1
+        #expect(delegate.events == [
+            .init(node: 2, kind: .change, payload: .int(0)),
+            .init(node: 7, kind: .change, payload: .int(1)),
+        ])
+
+        // The guest's answer replaces the local value only when it differs
+        // from what it last sent.
+        var answered = Self.screen
+        answered.children[0].props["selection"] = 0
+        renderer.apply(answered)
+        #expect(picker.value == .int(0))
     }
 
-    @Test func shapesFillStrokeOrTakeTheForeground() throws {
-        let palette = Palette(scheme: .light)
-        guard case .fill(let rect, let color, let radius)? = try ops(shape(["shape": "circle", "fill": "red"])).first else {
-            Issue.record("no fill")
-            return
-        }
-        #expect(rect.size == Size(width: 20, height: 20), "a circle is as wide as it's tall")
-        #expect(color == palette.named("red") && radius == 10)
+    @Test func dismissingSendsChange() throws {
+        let (renderer, delegate) = makeRenderer()
+        renderer.apply(Self.screen)
+        let store = renderer.store
+        let sheet = presentedBinding(try #require(renderer.model(12)), store)
+        let alert = presentedBinding(try #require(renderer.model(15)), store)
+        #expect(sheet.wrappedValue)
+        #expect(!alert.wrappedValue)
 
-        guard case .fill(_, let capsule, let capsuleRadius)? = try ops(shape(["shape": "capsule"])).first else {
-            Issue.record("no fill")
-            return
-        }
-        #expect(capsule == palette.primary, "no fill or stroke: the foreground color")
-        #expect(capsuleRadius == 10)
-
-        guard case .stroke(_, let stroke, let width, _)? = try ops(shape(["shape": "roundedRectangle", "cornerRadius": 4.0,
-                                                                            "stroke": "blue", "lineWidth": 2.0])).first else {
-            Issue.record("no stroke")
-            return
-        }
-        #expect(stroke == palette.named("blue") && width == 2)
+        alert.wrappedValue = true
+        #expect(delegate.events.isEmpty, "only the guest presents")
+        sheet.wrappedValue = false
+        #expect(!sheet.wrappedValue)
+        #expect(delegate.events == [.init(node: 12, kind: .change, payload: .bool(false))])
     }
 
-    func refreshableList(refreshing: Bool) -> RenderNode {
+    /// A sheet's content stays while the sheet slides away, after the guest
+    /// removed it.
+    @Test func heldContentOutlivesItsRemoval() throws {
+        let (renderer, delegate) = makeRenderer()
+        delegate.rows = { list, index in text(list &* 100 &+ RenderNode.ID(index), "Row \(index)") }
+        let content = RenderNode("VStack", id: 20, children: [
+            text(21, "Content"),
+            RenderNode("LazyVStack", id: 22, props: ["revision": 1], count: 2),
+        ])
+        let presented = RenderNode("Sheet", id: 12, props: ["isPresented": true, "style": "sheet"], children: [text(13, "Anchor"), content])
+        let dismissed = RenderNode("Sheet", id: 12, props: ["isPresented": false, "style": "sheet"], children: [text(13, "Anchor")])
+        let store = renderer.store
+        renderer.apply(presented)
+        _ = store.row(22, index: 0)
+        store.rowAppeared(22, index: 0)
+        store.hold(20)
+
+        renderer.apply(dismissed)
+        #expect(store.models[20] == nil, "gone from the tree")
+        #expect(store.model(20)?.childIDs == [21, 22], "but still shown")
+        #expect(store.model(21)?.node.props["text"] == "Content")
+        #expect(store.row(22, index: 0).rootID == 2200, "with its rows")
+        #expect(delegate.rowRequests.count == 1, "not fetched again")
+
+        store.release(20)
+        #expect(store.model(20) == nil)
+        #expect(store.model(21) == nil)
+        #expect(store.model(2200) == nil, "its rows go too")
+
+        // Presented again, then removed without a hold: gone at once.
+        renderer.apply(presented)
+        #expect(store.model(21) != nil)
+        renderer.apply(dismissed)
+        #expect(store.model(21) == nil)
+    }
+
+    @Test func releasingLiveContentKeepsIt() {
+        let (renderer, _) = makeRenderer()
+        renderer.apply(Self.screen)
+        renderer.store.hold(14)
+        renderer.store.release(14)
+        #expect(renderer.store.model(14) != nil, "still in the tree")
+    }
+
+    @Test func buttonsShowTheirText() {
+        let (renderer, _) = makeRenderer()
+        renderer.apply(RenderNode("VStack", id: 1, children: [
+            RenderNode("Button", id: 2, children: [text(3, "Delete")]),
+            RenderNode("Button", id: 4, children: [RenderNode("Label", id: 5, props: ["title": "Share", "systemImage": "square.and.arrow.up"])]),
+            RenderNode("Button", id: 6, children: [RenderNode("HStack", id: 7, children: [RenderNode("Image", id: 8, props: ["systemName": "star"]), text(9, "Star")])]),
+            RenderNode("Button", id: 10, children: [RenderNode("Image", id: 11, props: ["systemName": "star"])]),
+        ]))
+        #expect(renderer.store.text(of: 2) == "Delete")
+        #expect(renderer.store.text(of: 4) == "Share")
+        #expect(renderer.store.text(of: 6) == "Star")
+        #expect(renderer.store.text(of: 10) == nil)
+        #expect(renderer.store.text(of: 99) == nil)
+    }
+
+    @Test func toolbarPlacements() {
+        #expect(Toolbars.placement("primaryAction").name == "primaryAction")
+        #expect(Toolbars.placement("cancellationAction").name == "cancellationAction")
+        #expect(Toolbars.placement("confirmationAction").name == "confirmationAction")
+        #expect(Toolbars.placement("navigation").name == "navigation")
+        #expect(Toolbars.placement("principal").name == "principal")
+        #expect(Toolbars.placement("someFuturePlacement").name == "automatic")
+        #expect(Toolbars.placement(nil).name == "automatic")
+        #if os(iOS)
+        #expect(Toolbars.placement("bottomBar").name == "bottomBar")
+        #else
+        #expect(Toolbars.placement("bottomBar").name == "automatic", "macOS has no bottom bar")
+        #endif
+    }
+
+    @Test func dialogTitleVisibility() {
+        #expect(AlertView.visibility("visible") == .visible)
+        #expect(AlertView.visibility("hidden") == .hidden)
+        #expect(AlertView.visibility("automatic") == .automatic)
+        #expect(AlertView.visibility(nil) == .automatic)
+    }
+
+    @Test func disclosureAndSearchAreControlValues() throws {
+        let (renderer, delegate) = makeRenderer()
+        renderer.apply(RenderNode("Searchable", id: 1, props: ["text": "du", "prompt": "Books"], children: [
+            RenderNode("DisclosureGroup", id: 2, props: ["isExpanded": false], children: [text(3, "Details")]),
+        ]))
+        let search = try #require(renderer.model(1))
+        let group = try #require(renderer.model(2))
+        #expect(search.value == .string("du"))
+        #expect(group.value == .bool(false))
+        renderer.store.change(search, to: .string("dun"))
+        renderer.store.change(group, to: .bool(true))
+        renderer.store.send(1, .submit)
+        #expect(delegate.events == [
+            .init(node: 1, kind: .change, payload: .string("dun")),
+            .init(node: 2, kind: .change, payload: .bool(true)),
+            .init(node: 1, kind: .submit, payload: nil),
+        ])
+        #expect(group.value == .bool(true), "shown before the guest answers")
+    }
+
+    @Test func datePickerComponentsAndRanges() {
+        #expect(DatePickerNodeView.components("date") == .date)
+        #expect(DatePickerNodeView.components("hourAndMinute") == .hourAndMinute)
+        #expect(DatePickerNodeView.components("date,hourAndMinute") == [.date, .hourAndMinute])
+        #expect(DatePickerNodeView.components("someFuture") == [.date, .hourAndMinute])
+        #expect(DatePickerNodeView.components(nil) == [.date, .hourAndMinute])
+
+        let range = DatePickerNodeView.range(["min": 0.0, "max": 60.0])
+        #expect(range?.lowerBound.timeIntervalSince1970 == 0)
+        #expect(range?.upperBound.timeIntervalSince1970 == 60)
+        #expect(DatePickerNodeView.range(["min": 60.0, "max": 0.0]) == nil)
+        #expect(DatePickerNodeView.range(["min": 0.0]) == nil)
+        #expect(DatePickerNodeView.range(["min": 0.0, "max": .double(.infinity)]) == nil)
+    }
+
+    static func refreshable(_ refreshing: Bool) -> RenderNode {
         RenderNode("Refreshable", id: 1, props: ["refreshing": .bool(refreshing)], children: [
-            RenderNode("List", id: 2, children: (0..<3).map { text(10 + RenderNode.ID($0), "Row \($0)") }),
+            RenderNode("List", id: 2, children: [text(3, "Row")]),
         ])
     }
 
-    @Test func pullingPastTheTopRefreshes() {
-        let (store, guest) = makeStore(refreshableList(refreshing: false))
-        #expect(store.screen.texts.contains("Row 0"), "it stands in for its list")
-        let point = Point(x: 200, y: 300)
-        store.handle(.scroll(point, dx: 0, dy: -40), size: window)
-        #expect(guest.events.isEmpty, "not far enough")
-        store.handle(.scroll(point, dx: 0, dy: -40), size: window)
-        #expect(guest.events == [.init(id: 1, kind: .refresh)])
-
-        // While refreshing: a spinner, and no second refresh.
-        store.apply(refreshableList(refreshing: true))
-        let spinner = store.screen.root?.overlayOps.contains { if case .circle = $0 { true } else { false } }
-        #expect(spinner == true)
-        store.handle(.scroll(point, dx: 0, dy: -200), size: window)
-        #expect(guest.events == [.init(id: 1, kind: .refresh)])
+    @Test func refreshWaitsForTheGuest() async throws {
+        let (renderer, delegate) = makeRenderer()
+        renderer.apply(Self.refreshable(false))
+        delegate.onEvent = { event in
+            if event.kind == .refresh {
+                renderer.apply(Self.refreshable(true))
+            }
+        }
+        let model = try #require(renderer.model(1))
+        let refresh = Task { await renderer.store.refresh(model) }
+        for _ in 0..<100 where delegate.events.isEmpty {
+            await Task.yield()
+        }
+        #expect(delegate.events == [.init(node: 1, kind: .refresh, payload: nil)])
+        // Still refreshing: the guest's action hasn't finished.
+        renderer.apply(Self.refreshable(false))
+        await refresh.value
     }
 
-    @Test func contextMenusJoinSwipeActions() {
-        let row = RenderNode("SwipeActions", id: 10, children: [
-            RenderNode("ContextMenu", id: 11, children: [text(12, "Row"), button(13, "Pin")]),
-            button(14, "Delete", role: "destructive"),
-        ])
-        let (store, guest) = makeStore(RenderNode("List", id: 1, children: [row]))
-        #expect(store.screen.texts.contains("Row") && !store.screen.texts.contains("Pin"))
-        store.tap("Row", button: .secondary)
-        let popup = store.screen.texts
-        #expect(popup.filter { $0 == "Pin" }.count == 1 && popup.filter { $0 == "Delete" }.count == 1, "each item once")
-        store.tap("Pin")
-        #expect(guest.events == [.init(id: 13, kind: .tap)])
+    @Test func refreshEndsAtOnceWhenTheGuestIsDone() async throws {
+        let (renderer, delegate) = makeRenderer()
+        renderer.apply(Self.refreshable(false))
+        let model = try #require(renderer.model(1))
+        await renderer.store.refresh(model)
+        #expect(delegate.events.map(\.kind) == [.refresh])
     }
 
-    // MARK: Date pickers
-
-    /// 2025-07-08 18:40 UTC.
-    static let july8 = 1_752_000_000.0
-
-    func datePicker(_ value: Double, components: String = "date,hourAndMinute", max: Double? = nil) -> (RenderStore, FakeGuest) {
-        var props: [String: PropValue] = ["title": "Picked", "value": .double(value), "components": .string(components)]
-        if let max { props["max"] = .double(max) }
-        let guest = FakeGuest()
-        let store = RenderStore(textEngine: FixedTextEngine())
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "UTC")!
-        calendar.locale = Locale(identifier: "en_US")
-        store.calendar = calendar
-        store.delegate = guest
-        store.apply(RenderNode("DatePicker", id: 2, props: props))
-        return (store, guest)
+    @Test func buttonRoles() {
+        #expect(Styles.buttonRole("destructive") == .destructive)
+        #expect(Styles.buttonRole("cancel") == .cancel)
+        #expect(Styles.buttonRole("someFutureRole") == nil)
+        #expect(Styles.buttonRole(nil) == nil)
     }
 
-    func click(_ store: RenderStore, _ type: String) throws {
-        let box = try #require(store.screen.find(type), "no \(type)")
-        store.click(Point(x: box.frame.midX, y: box.frame.midY))
-    }
+    @Test func gridItems() throws {
+        let items = Styles.gridItems(.array([
+            .array(["fixed", 40.0, 40.0, 6.0, "leading", "top"]),
+            .array(["flexible", 20.0, 10.0]),
+            .array(["adaptive", 0.0, .double(.infinity), 2.0, "center", "center"]),
+            .array(["someFutureSize", 1.0, 1.0]),
+            .array(["fixed"]),
+            "notAnItem",
+        ]))
+        #expect(items.count == 3, "unknown and malformed items are skipped")
 
-    @Test func datePickersShowDateAndTime() throws {
-        let (store, _) = datePicker(Self.july8)
-        let texts = store.screen.texts
-        #expect(texts.contains("Picked"))
-        #expect(texts.contains("Jul 8, 2025"))
-        #expect(texts.contains { $0.contains("6:40") }, "the time, short")
-        let dateOnly = datePicker(Self.july8, components: "date").0.screen
-        #expect(dateOnly.find("DatePicker.time") == nil)
-    }
+        guard case .fixed(let length) = items[0].size else {
+            Issue.record("not fixed: \(items[0].size)")
+            return
+        }
+        #expect(length == 40)
+        #expect(items[0].spacing == 6)
+        #expect(items[0].alignment == .topLeading)
 
-    @Test func popoversStepAField() throws {
-        let (store, guest) = datePicker(Self.july8)
-        try click(store, "DatePicker.date")
-        #expect(store.screen.texts.contains("Jul") && store.screen.texts.contains("2025"), "month and year rows")
-        try click(store, "DatePopover.day+")
-        try click(store, "DatePopover.month-")
-        #expect(guest.events.map(\.payload) == [.double(Self.july8 + 86_400), .double(Self.july8 - 30 * 86_400)])
+        guard case .flexible(let minimum, let maximum) = items[1].size else {
+            Issue.record("not flexible: \(items[1].size)")
+            return
+        }
+        #expect(minimum == 20 && maximum == 20, "the maximum is at least the minimum")
+        #expect(items[1].spacing == nil)
 
-        // A click outside closes it; the time pill opens hours and minutes.
-        store.click(Point(x: 1, y: 1))
-        #expect(store.screen.find("DatePopover") == nil)
-        try click(store, "DatePicker.time")
-        #expect(store.screen.find("DatePopover.hour+") != nil && store.screen.find("DatePopover.day+") == nil)
-        store.handle(.key(.escape, []), size: window)
-        #expect(store.screen.find("DatePopover") == nil)
-    }
+        guard case .adaptive(let adaptiveMinimum, let adaptiveMaximum) = items[2].size else {
+            Issue.record("not adaptive: \(items[2].size)")
+            return
+        }
+        #expect(adaptiveMinimum == 1, "never zero, which would never end")
+        #expect(adaptiveMaximum == .infinity)
 
-    @Test func stepsStopAtTheBounds() throws {
-        let (store, guest) = datePicker(Self.july8, max: Self.july8 + 3_600)
-        try click(store, "DatePicker.date")
-        try click(store, "DatePopover.day+")
-        #expect(guest.events.map(\.payload) == [.double(Self.july8 + 3_600)], "clamped to max")
-        store.apply(RenderNode("DatePicker", id: 2, props: ["title": "Picked", "value": .double(Self.july8 + 3_600),
-                                                            "components": "date", "max": .double(Self.july8 + 3_600)]))
-        try click(store, "DatePopover.day+")
-        #expect(guest.events.count == 1, "nothing further: + is disabled")
+        #expect(Styles.gridItems(.array([])).count == 1)
+        #expect(Styles.gridItems(nil).count == 1)
     }
 }
