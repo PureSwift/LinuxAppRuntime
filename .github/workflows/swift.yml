@@ -24,10 +24,11 @@ jobs:
       SDL_VIDEO_DRIVER: offscreen
     steps:
       - uses: actions/checkout@v4
-      - name: Install SDL3, SDL3_ttf and fontconfig
+      - name: Install SDL3, Cairo, FreeType, fontconfig and Wayland for Cacao
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends libsdl3-dev libsdl3-ttf-dev libfontconfig-dev fonts-dejavu-core
+          apt-get install -y --no-install-recommends libsdl3-dev libcairo2-dev libfreetype-dev \
+            libfontconfig-dev libwayland-dev wayland-protocols fonts-dejavu-core
       - name: Build
         run: swift build --build-tests
       - name: Test
