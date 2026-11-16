@@ -71,6 +71,7 @@ let package = Package(
         .library(name: "LinuxUI", targets: ["LinuxUI"]),
         .library(name: "LinuxBluetooth", targets: ["LinuxBluetooth"]),
         .library(name: "LinuxGraphics", targets: ["LinuxGraphics"]),
+        .library(name: "LinuxWebKit", targets: ["LinuxWebKit"]),
         .library(name: "LinuxHostApp", targets: ["LinuxHostApp"]),
         .executable(name: "linux-app-host", targets: ["LinuxAppHost"]),
         .executable(name: "linux-app", targets: ["LinuxAppTool"]),
@@ -101,7 +102,7 @@ let package = Package(
         // over Cacao's SwiftUI.
         .target(
             name: "LinuxUI",
-            dependencies: ["LinuxHost", "LinuxGraphics", runtime("DynamicUI"), runtime("DynamicRuntime"), runtime("RuntimeNative")] + swiftUI,
+            dependencies: ["LinuxHost", "LinuxGraphics", "LinuxWebKit", runtime("DynamicUI"), runtime("DynamicRuntime"), runtime("RuntimeNative")] + swiftUI,
             exclude: ["DARWINUI_REVISION"],
             swiftSettings: host
         ),
@@ -127,13 +128,22 @@ let package = Package(
             swiftSettings: host
         ),
 
+        // MARK: - Web views
+
+        // WPE WebKit, loaded at run time: the host links no WebKit.
+        .target(
+            name: "LinuxWebKit",
+            dependencies: ["LinuxHost", runtime("DynamicWebKit"), runtime("DynamicRuntime"), runtime("RuntimeABI")],
+            swiftSettings: host
+        ),
+
         // MARK: - App
 
         // libc functions app slices need that older glibc lacks.
         .target(name: "CLinuxHost"),
         .target(
             name: "LinuxHostApp",
-            dependencies: ["LinuxHost", "LinuxUI", "LinuxBluetooth", "LinuxGraphics", "CLinuxHost", runtime("CRuntime"),
+            dependencies: ["LinuxHost", "LinuxUI", "LinuxBluetooth", "LinuxGraphics", "LinuxWebKit", "CLinuxHost", runtime("CRuntime"),
                            .product(name: "CacaoSDL", package: "Cacao")],
             swiftSettings: host
         ),
@@ -155,7 +165,8 @@ let package = Package(
         // doesn't build Cacao.
         .target(
             name: "LinuxPackager",
-            dependencies: ["LinuxHost", "LinuxBluetooth", "LinuxGraphics", runtime("DynamicUI"), .product(name: "Crypto", package: "swift-crypto")]
+            dependencies: ["LinuxHost", "LinuxBluetooth", "LinuxGraphics", "LinuxWebKit", runtime("DynamicUI"),
+                           .product(name: "Crypto", package: "swift-crypto")]
         ),
         .executableTarget(
             name: "LinuxAppTool",
@@ -172,6 +183,7 @@ let package = Package(
         ),
         .testTarget(name: "LinuxBluetoothTests", dependencies: ["LinuxBluetooth"], swiftSettings: host),
         .testTarget(name: "LinuxGraphicsTests", dependencies: ["LinuxGraphics", runtime("DynamicGraphics")], swiftSettings: host),
+        .testTarget(name: "LinuxWebKitTests", dependencies: ["LinuxWebKit", runtime("DynamicWebKit")], swiftSettings: host),
         .testTarget(name: "LinuxPackagerTests", dependencies: ["LinuxPackager", "LinuxHostApp"]),
     ]
 )
