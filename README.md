@@ -12,6 +12,7 @@ Linux program:
   SwiftUI for Linux;
 - **Bluetooth** LE central over BlueZ's D-Bus API;
 - **GL surfaces**: OpenGL ES 2.0 in a SwiftUI view, over EGL;
+- **web views**: WPE WebKit pages in a SwiftUI view;
 - the **packager**, `linux-app`, which turns a universal bundle into an
   installable app.
 
@@ -31,6 +32,10 @@ llvmpipe:
 
 ![ExampleGL on Linux](Documentation/ExampleGL.png)
 
+`ExampleWeb` shows a page in a `WebView` with WPE WebKit:
+
+![ExampleWeb on Linux](Documentation/ExampleWeb.png)
+
 ## Modules
 
 | Module | |
@@ -39,22 +44,31 @@ llvmpipe:
 | `LinuxUI` | The SwiftUI player: DarwinAppRuntime's `DarwinUI`, copied by `Scripts/sync-darwinui.sh`, over Cacao's `SwiftUI` |
 | `LinuxBluetooth` | `Central`, `Peripheral`, `Service`, `Characteristic`, `Descriptor` and `Advertisement` over BlueZ, through `wendylabsinc/dbus` |
 | `LinuxGraphics` | `Surface`: GLES 2.0 drawn in EGL pbuffers, loaded at run time, and read back into the player's `GLSurface` view ([plan](Documentation/Plan.md) §7) |
+| `LinuxWebKit` | `WebContent`: WPE WebKit pages, loaded at run time, drawn into shared memory and shown by the player's `WebView` view ([plan](Documentation/Plan.md) §8) |
 | `LinuxHostApp`, `linux-app-host` | The app's `main`: the host, and Cacao's window and loop |
 | `LinuxPackager`, `linux-app` | The packager: validation, the host build, wasm2c, the install tree, PortMaster ports |
 
 ## Building
 
-Swift 6.4.2 (`.swift-version`); SDL3, Cairo, FreeType, fontconfig and
-Wayland for Cacao; and EGL and GLES 2.0, which GL surfaces load at run time
-and apps that draw link (Mesa's draw without a GPU):
+Swift 6.4.2 (`.swift-version`) on Debian 13; SDL 3.4, Cairo, FreeType,
+fontconfig and Wayland for Cacao; EGL and GLES 2.0, which GL surfaces load
+at run time and apps that draw link (Mesa's draw without a GPU); and WPE
+WebKit, which web views load at run time:
 
 ```sh
-apt-get install libsdl3-dev libcairo2-dev libfreetype-dev libfontconfig-dev \
+apt-get install cmake ninja-build git libcairo2-dev libfreetype-dev libfontconfig-dev \
     libwayland-dev wayland-protocols fonts-dejavu-core \
-    libegl1 libegl-mesa0 libgles-dev libgl1-mesa-dri
+    libegl1 libegl-mesa0 libgles-dev libgl1-mesa-dri \
+    libwpewebkit-2.0-1 libwpebackend-fdo-1.0-1 libwayland-server0
+Scripts/build-sdl3.sh /usr -DCMAKE_INSTALL_LIBDIR=lib/$(uname -m)-linux-gnu
 swift build
 swift test
 ```
+
+Debian's SDL is 3.2, and PureSwift/SDL needs 3.4, so `build-sdl3.sh`
+builds it. Ubuntu 26.04 doesn't package WPE WebKit. In a container, WebKit's
+web processes need `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1`: its
+bubblewrap sandbox can't make namespaces there.
 
 The `Dockerfile` has all of it; `Scripts/docker.sh` runs a command there,
 with this checkout at `/src`:
