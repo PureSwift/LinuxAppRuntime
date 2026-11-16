@@ -46,7 +46,7 @@ AppRuntime's contracts.
 | arm64 and x86_64 Linux with glibc (Debian 13, Ubuntu 24.04+) | armv7, musl |
 | Native slices linked into the host | wasm2c (AppRuntime's shim, as on Darwin); WasmKit for development |
 | Wayland and X11 through SDL3; a headless driver for tests | Multiple windows |
-| `Renderer`, Bluetooth `Central` and friends, GL surfaces, web views, the built-ins | Location (GeoClue), Device (UPower, sysfs), Networking (libcurl), Formatting (ICU), Motion (iio-sensor-proxy), NFC (neard) |
+| `Renderer`, Bluetooth `Central` and friends, GL surfaces, web views, files, the built-ins | Location (GeoClue), Device (UPower, sysfs), Networking (libcurl), Formatting (ICU), Motion (iio-sensor-proxy), NFC (neard) |
 
 ## 2. Process model
 
@@ -87,13 +87,13 @@ timers for `schedule`.
 
 | Module | Contents |
 |---|---|
-| `LinuxHost` | `AppHost` (built-ins, modules, `rt_main`), `MainLoop`, `MainLoopClock`, the `Bundle` built-in; over AppRuntime's `RuntimeHost`, which every host shares: `AppInfo` (the bundle's `Info.plist` keys), the compatibility checks, `HostModule`, and the `Permissions` and `Application` built-ins |
+| `LinuxHost` | `AppHost` (built-ins, modules, `rt_main`), `MainLoop`, `MainLoopClock`, the `Bundle` built-in, and `LinuxFiles` (§9); over AppRuntime's `RuntimeHost`, which every host shares: `AppInfo` (the bundle's `Info.plist` keys), the compatibility checks, `HostModule`, the `Permissions` and `Application` built-ins, and `HostFiles` |
 | `LinuxUI` | The SwiftUI player: DarwinAppRuntime's `DarwinUI`, copied by `Scripts/sync-darwinui.sh`, over Cacao's `SwiftUI` and `Combine` modules; `Host.swift` gives it the logger and bundle it takes from its host |
 | `LinuxBluetooth` | `Central`, `Peripheral`, `Service`, `Characteristic`, `Descriptor`, `Advertisement` over BlueZ |
 | `LinuxGraphics` | `Surface` over EGL and GLES 2.0, loaded at run time; the player's `GLSurface` view shows it (§7) |
 | `LinuxWebKit` | `WebContent` over WPE WebKit, loaded at run time; the player's `WebView` view shows it (§8) |
 | `LinuxHostApp` | `main`: reads the app's keys, starts the host, and runs Cacao's SDL loop with one window showing the guest's first renderer |
-| `LinuxPackager`, `linux-app` | The packager (§10, [Packager.md](Packager.md)) |
+| `LinuxPackager`, `linux-app` | The packager (§11, [Packager.md](Packager.md)) |
 
 The package depends on AppRuntime without its `GuestExports` trait, like
 DarwinAppRuntime, so the slice's `rt_dispatch` and `rt_finalize` are the
@@ -275,13 +275,41 @@ WebKit, and the player draws `WebView` nodes. It follows Perry's
   - Reading files beside a bundled page only: WebKit's file-URL rules
     apply.
 
-## 9. Testing
+## 9. Files
+
+`LinuxFiles` is the `Files` contract (AppRuntime's `Files.md`): AppRuntime's
+`HostFiles`, which does it all over POSIX calls, with the app's directories
+where Linux keeps them, and answers posted to the main loop from its queue.
+
+| Directory | In a container | Otherwise, XDG's |
+|---|---|---|
+| `documents` | `<container>/Documents` | `$XDG_DATA_HOME/<id>/Documents` |
+| `data` | `<container>/Data` | `$XDG_DATA_HOME/<id>/Data` |
+| `caches` | `<container>/Caches` | `$XDG_CACHE_HOME/<id>` |
+| `temporary` | `<container>/tmp` | `$XDG_RUNTIME_DIR/<id>`, or `/tmp/<id>-<uid>` |
+| `bundle` | the bundle's `resources/` | the same |
+
+- **`<id>`** is the bundle identifier, which must name a directory.
+  `XDG_DATA_HOME` is `~/.local/share` and `XDG_CACHE_HOME` `~/.cache` when
+  they're unset or relative, as the XDG specification says.
+- **A container** is `LINUXAPPRUNTIME_CONTAINER`, an absolute path:
+  - a PortMaster port's is its `conf/` folder, where ports keep what's
+    theirs;
+  - a launcher's sandbox would pass `/data` (AppRuntime's §7.8).
+- **`temporary` is the app's own**, never `/tmp` itself, since `HostFiles`
+  empties it at every start.
+- **If the directories can't be decided**, for example with no `HOME`, the
+  host logs why and every operation fails through its callback.
+
+## 10. Testing
 
 - `LinuxUI`: DarwinUI's tests, on Cacao (§5).
 - `LinuxBluetooth`: the contract against a fake `BlueZBus` that plays
   BlueZ's objects and signals. Runs on macOS and Linux.
 - `LinuxGraphics`: a surface's input order, focus and size, and on Linux
   frames drawn and read back with Mesa's llvmpipe, and a lost context.
+- `LinuxHost`'s files: the directories from the environment, and the
+  contract end to end in a container, answering on the main loop.
 - `LinuxWebKit`: on Linux, in WPE: loading HTML and the events' order,
   scripts' JSON, navigations asked about and refused, back, bundle
   resources, a refused connection, remote loads without `network`, frames
@@ -293,7 +321,7 @@ WebKit, and the player draws `WebView` nodes. It follows Perry's
 - Real BlueZ needs hardware: manual runs on a Raspberry Pi or a laptop with
   `bluetoothd`.
 
-## 10. Phases
+## 11. Phases
 
 1. **Host runtime and player**: `LinuxHost`, `LinuxUI`, `LinuxBluetooth`,
    `LinuxHostApp`; `ExampleUI` runs in Docker.
@@ -308,7 +336,7 @@ WebKit, and the player draws `WebView` nodes. It follows Perry's
 4. **Player**: what DarwinUI and Cacao add: Cacao's AT-SPI bridge, input
    replay for end-to-end tests.
 
-## 11. Open questions
+## 12. Open questions
 
 - **Permissions.** Desktop Linux has no prompts for Bluetooth; Flatpak's
   portals cover location and the camera. `Permissions.request` answers from
