@@ -22,11 +22,16 @@ public struct HostPackage {
     /// The app's `libapp.a`.
     public var library: URL
 
-    public init(directory: URL, hostPackage: URL, executable: String, library: URL) {
+    /// Whether the app calls GL (it declares `graphics`): its `gl*` calls
+    /// are `libGLESv2`'s, which the host then links.
+    public var linksGL: Bool
+
+    public init(directory: URL, hostPackage: URL, executable: String, library: URL, linksGL: Bool = false) {
         self.directory = directory
         self.hostPackage = hostPackage
         self.executable = executable
         self.library = library
+        self.linksGL = linksGL
     }
 
     /// Where this package's source is: `--host-package`, then
@@ -87,7 +92,7 @@ public struct HostPackage {
                     name: "AppMain",
                     dependencies: [.product(name: "LinuxHostApp", package: "LinuxAppRuntime")],
                     swiftSettings: [.swiftLanguageMode(.v5)],
-                    linkerSettings: [.unsafeFlags([\(literal(library.path))])]
+                    linkerSettings: [.unsafeFlags([\(([library.path] + (linksGL ? ["-lGLESv2"] : [])).map(literal).joined(separator: ", "))])]
                 ),
             ]
         )
