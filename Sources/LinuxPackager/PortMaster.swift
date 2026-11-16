@@ -241,8 +241,10 @@ public struct PortMasterPort {
             export TEXTINPUTINTERACTIVE="Y"
 
             # The host on a handheld: one fullscreen window, a drawn pointer, the
-            # port's fonts when fontconfig isn't there, and phone-sized layouts
-            # scaled to the screen.
+            # port's fonts when fontconfig isn't there, phone-sized layouts
+            # scaled to the screen, and the app's files in the port's conf/,
+            # where ports keep what's theirs.
+            export LINUXAPPRUNTIME_CONTAINER="$GAMEDIR/conf"
             export LINUXAPPRUNTIME_FULLSCREEN=1
             export LINUXAPPRUNTIME_CURSOR=1
             export LINUXAPPRUNTIME_FONTS="$GAMEDIR/fonts"

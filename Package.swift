@@ -92,7 +92,8 @@ let package = Package(
 
         .target(
             name: "LinuxHost",
-            dependencies: [runtime("CRuntime"), runtime("RuntimeCore"), runtime("RuntimeNative"), runtime("DynamicRuntime"), runtime("RuntimeABI"), runtime("RuntimeHost")],
+            dependencies: [runtime("CRuntime"), runtime("RuntimeCore"), runtime("RuntimeNative"), runtime("DynamicRuntime"), runtime("RuntimeABI"),
+                           runtime("RuntimeHost"), runtime("DynamicFiles")],
             swiftSettings: host
         ),
 
@@ -175,7 +176,7 @@ let package = Package(
 
         // MARK: - Tests
 
-        .testTarget(name: "LinuxHostTests", dependencies: ["LinuxHost"], swiftSettings: host),
+        .testTarget(name: "LinuxHostTests", dependencies: ["LinuxHost", runtime("DynamicFiles")], swiftSettings: host),
         .testTarget(
             name: "LinuxUITests",
             dependencies: ["LinuxUI", runtime("DynamicUI"), runtime("DynamicRuntime"), .product(name: "Cacao", package: "Cacao")] + swiftUI,
