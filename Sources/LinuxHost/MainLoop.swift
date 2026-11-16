@@ -37,6 +37,11 @@ public final class MainLoop {
 
     private var stopping = false
 
+    /// Runs jobs and timers on the main dispatch queue instead of in `run`:
+    /// for when another loop owns the main thread and drains that queue, as
+    /// Cacao's does. Set it before posting or scheduling.
+    public var runsOnMainQueue = false
+
     public init(driver: any MainLoopDriver = ConditionDriver()) {
         self.driver = driver
     }
@@ -57,7 +62,11 @@ public final class MainLoop {
         lock.lock()
         posted.append(job)
         lock.unlock()
-        driver.wake()
+        if runsOnMainQueue {
+            DispatchQueue.main.async { [self] in turn(wait: false) }
+        } else {
+            driver.wake()
+        }
     }
 
     // MARK: Timers
@@ -84,6 +93,12 @@ public final class MainLoop {
         let timer = Timer(deadline: deadline, token: token, body: body)
         let index = timers.firstIndex { $0.deadline > deadline } ?? timers.endIndex
         timers.insert(timer, at: index)
+        if runsOnMainQueue {
+            let delay = max(deadline - Self.now(), 0)
+            DispatchQueue.main.asyncAfter(deadline: .now() + .nanoseconds(Int(clamping: delay))) { [self] in
+                turn(wait: false)
+            }
+        }
         return token
     }
 
