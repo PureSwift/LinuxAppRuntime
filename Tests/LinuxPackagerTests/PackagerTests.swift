@@ -90,7 +90,15 @@ import Testing
     }
 
     @Test func theHostAndThePackagerAgreeOnModules() {
-        #expect(HostContracts.modules.map { String(describing: $0) } == HostApp.modules.map { String(describing: $0) })
+        var host: [String] = []
+        for module in HostApp.modules {
+            host += module.contracts.map { $0.name }
+        }
+        var packager: [String] = []
+        for module in HostContracts.modules {
+            packager += module.contracts.map { $0.name }
+        }
+        #expect(packager == host)
     }
 }
 
