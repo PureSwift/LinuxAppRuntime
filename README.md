@@ -11,6 +11,7 @@ Linux program:
   frontend's render IR, on [Cacao](https://github.com/PureSwift/Cacao),
   SwiftUI for Linux;
 - **Bluetooth** LE central over BlueZ's D-Bus API;
+- **GL surfaces**: OpenGL ES 2.0 in a SwiftUI view, over EGL;
 - the **packager**, `linux-app`, which turns a universal bundle into an
   installable app.
 
@@ -25,6 +26,11 @@ through wasm2c, and the packaged app runs. See the
 
 ![ExampleUI on Linux](Documentation/ExampleUI.png)
 
+`ExampleGL` draws its triangle in a `GLSurface` the same way, with Mesa's
+llvmpipe:
+
+![ExampleGL on Linux](Documentation/ExampleGL.png)
+
 ## Modules
 
 | Module | |
@@ -32,17 +38,20 @@ through wasm2c, and the packaged app runs. See the
 | `LinuxHost` | `AppHost` (built-ins, modules, `rt_main`), `MainLoop` and its clock, and the `Bundle` built-in, over AppRuntime's shared `RuntimeHost` (`AppInfo`, compatibility checks, `HostModule`, `Permissions`, `Application`) |
 | `LinuxUI` | The SwiftUI player: DarwinAppRuntime's `DarwinUI`, copied by `Scripts/sync-darwinui.sh`, over Cacao's `SwiftUI` |
 | `LinuxBluetooth` | `Central`, `Peripheral`, `Service`, `Characteristic`, `Descriptor` and `Advertisement` over BlueZ, through `wendylabsinc/dbus` |
+| `LinuxGraphics` | `Surface`: GLES 2.0 drawn in EGL pbuffers, loaded at run time, and read back into the player's `GLSurface` view ([plan](Documentation/Plan.md) §7) |
 | `LinuxHostApp`, `linux-app-host` | The app's `main`: the host, and Cacao's window and loop |
 | `LinuxPackager`, `linux-app` | The packager: validation, the host build, wasm2c, the install tree, PortMaster ports |
 
 ## Building
 
-Swift 6.4.2 (`.swift-version`), and SDL3, Cairo, FreeType, fontconfig and
-Wayland for Cacao:
+Swift 6.4.2 (`.swift-version`); SDL3, Cairo, FreeType, fontconfig and
+Wayland for Cacao; and EGL and GLES 2.0, which GL surfaces load at run time
+and apps that draw link (Mesa's draw without a GPU):
 
 ```sh
 apt-get install libsdl3-dev libcairo2-dev libfreetype-dev libfontconfig-dev \
-    libwayland-dev wayland-protocols fonts-dejavu-core
+    libwayland-dev wayland-protocols fonts-dejavu-core \
+    libegl1 libegl-mesa0 libgles-dev libgl1-mesa-dri
 swift build
 swift test
 ```
@@ -55,7 +64,8 @@ Scripts/docker.sh swift test --scratch-path .build/linux
 ```
 
 AppRuntime and Cacao (its `develop` branch) come from GitHub.
-`APPRUNTIME_PATH` and `CACAO_PATH` point at local checkouts instead.
+`APPRUNTIME_PATH` and `CACAO_PATH` point at local checkouts instead, and
+`Scripts/docker.sh` mounts them.
 `Scripts/sync-darwinui.sh` updates the player from a DarwinAppRuntime
 checkout beside this one.
 
