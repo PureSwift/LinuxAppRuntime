@@ -104,3 +104,22 @@ Ubuntu 22.04 for both, armhf under emulation.
 
 - Focus navigation with the D-pad, without the pointer.
 - SDL's own gamepad events, for devices without `gptokeyb`.
+
+## 7. On Cacao
+
+The player is now DarwinUI on Cacao (`Plan.md` §5), and ports don't build
+with it yet. What's left:
+
+- **Cairo for old glibc.** Cacao draws with Silica over Cairo, so the
+  images need Cairo, pixman, libpng, FreeType, fontconfig and Expat built
+  for Ubuntu 22.04's glibc (from its packages; for armhf, into the SDK's
+  sysroot), and ports bundle them with SDL3. Cacao also links
+  `libwayland-client`.
+- **Handheld options in Cacao.** The earlier player read
+  `LINUXAPPRUNTIME_FULLSCREEN`, `LINUXAPPRUNTIME_SCALE`,
+  `LINUXAPPRUNTIME_CURSOR` and `LINUXAPPRUNTIME_FONTS` (§2); Cacao's window
+  needs the same: a fullscreen window, a scale for small screens, a drawn
+  pointer for `gptokeyb`'s mouse, and fonts when fontconfig has none. The
+  launcher still sets them.
+- **Testing.** `Scripts/portmaster.sh test` saves the first frame
+  (`CACAO_SCREENSHOT`); there's no input replay on Cacao yet.
