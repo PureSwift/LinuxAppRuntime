@@ -6,7 +6,8 @@ import RuntimeHost
 
 /// The `Files` contract (AppRuntime's `Files.md`): `RuntimeHost`'s
 /// `HostFiles`, with the app's directories where Linux keeps them, and
-/// answers on the main loop (`Plan.md` §9).
+/// answers on the main loop (`Plan.md` §9). `LinuxDefaults` keeps the
+/// app's settings beside them.
 ///
 /// | Directory | `LINUXAPPRUNTIME_CONTAINER` set | Otherwise (XDG) |
 /// |---|---|---|
@@ -89,12 +90,12 @@ public enum LinuxFiles: HostModule {
         return directories
     }
 
-    private static func nonEmpty(_ value: String?) -> String? {
+    static func nonEmpty(_ value: String?) -> String? {
         value.flatMap { $0.isEmpty ? nil : $0 }
     }
 
     /// The XDG specification ignores relative paths in its variables.
-    private static func absolute(_ value: String?) -> String? {
+    static func absolute(_ value: String?) -> String? {
         nonEmpty(value).flatMap { $0.hasPrefix("/") ? $0 : nil }
     }
 

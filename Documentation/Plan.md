@@ -46,7 +46,7 @@ AppRuntime's contracts.
 | arm64 and x86_64 Linux with glibc (Debian 13, Ubuntu 24.04+) | armv7, musl |
 | Native slices linked into the host | wasm2c (AppRuntime's shim, as on Darwin); WasmKit for development |
 | Wayland and X11 through SDL3; a headless driver for tests | Multiple windows |
-| `Renderer`, Bluetooth `Central` and friends, GL surfaces, web views, files, the built-ins | Location (GeoClue), Device (UPower, sysfs), Networking (libcurl), Formatting (ICU), Motion (iio-sensor-proxy), NFC (neard) |
+| `Renderer`, Bluetooth `Central` and friends, GL surfaces, web views, files, settings, the built-ins | Location (GeoClue), Device (UPower, sysfs), Networking (libcurl), Formatting (ICU), Motion (iio-sensor-proxy), NFC (neard) |
 
 ## 2. Process model
 
@@ -87,7 +87,7 @@ timers for `schedule`.
 
 | Module | Contents |
 |---|---|
-| `LinuxHost` | `AppHost` (built-ins, modules, `rt_main`), `MainLoop`, `MainLoopClock`, the `Bundle` built-in, and `LinuxFiles` (§9); over AppRuntime's `RuntimeHost`, which every host shares: `AppInfo` (the bundle's `Info.plist` keys), the compatibility checks, `HostModule`, the `Permissions` and `Application` built-ins, and `HostFiles` |
+| `LinuxHost` | `AppHost` (built-ins, modules, `rt_main`), `MainLoop`, `MainLoopClock`, the `Bundle` built-in, and `LinuxFiles` and `LinuxDefaults` (§9); over AppRuntime's `RuntimeHost`, which every host shares: `AppInfo` (the bundle's `Info.plist` keys), the compatibility checks, `HostModule`, the `Permissions` and `Application` built-ins, `HostFiles` and `HostDefaults` |
 | `LinuxUI` | The SwiftUI player: DarwinAppRuntime's `DarwinUI`, copied by `Scripts/sync-darwinui.sh`, over Cacao's `SwiftUI` and `Combine` modules; `Host.swift` gives it the logger and bundle it takes from its host |
 | `LinuxBluetooth` | `Central`, `Peripheral`, `Service`, `Characteristic`, `Descriptor`, `Advertisement` over BlueZ |
 | `LinuxGraphics` | `Surface` over EGL and GLES 2.0, loaded at run time; the player's `GLSurface` view shows it (§7) |
@@ -275,7 +275,7 @@ WebKit, and the player draws `WebView` nodes. It follows Perry's
   - Reading files beside a bundled page only: WebKit's file-URL rules
     apply.
 
-## 9. Files
+## 9. Files and settings
 
 `LinuxFiles` is the `Files` contract (AppRuntime's `Files.md`): AppRuntime's
 `HostFiles`, which does it all over POSIX calls, with the app's directories
@@ -301,6 +301,16 @@ where Linux keeps them, and answers posted to the main loop from its queue.
 - **If the directories can't be decided**, for example with no `HOME`, the
   host logs why and every operation fails through its callback.
 
+`LinuxDefaults` is the `Defaults` contract (`Defaults.md`): AppRuntime's
+`HostDefaults` over a `FileDefaultsStorage`, one file with every setting in
+it, rewritten atomically at each change.
+
+- **The file** is `<container>/Defaults` in a container. Otherwise it's
+  `$XDG_CONFIG_HOME/<id>/Defaults`, which is `~/.config/<id>/Defaults` by
+  default: XDG's place for settings.
+- **If it can't be opened**, the host logs why. Reads then find nothing,
+  and writes are refused.
+
 ## 10. Testing
 
 - `LinuxUI`: DarwinUI's tests, on Cacao (§5).
@@ -310,6 +320,8 @@ where Linux keeps them, and answers posted to the main loop from its queue.
   frames drawn and read back with Mesa's llvmpipe, and a lost context.
 - `LinuxHost`'s files: the directories from the environment, and the
   contract end to end in a container, answering on the main loop.
+- `LinuxHost`'s settings: the file's path from the environment, and
+  settings read again at the next launch.
 - `LinuxWebKit`: on Linux, in WPE: loading HTML and the events' order,
   scripts' JSON, navigations asked about and refused, back, bundle
   resources, a refused connection, remote loads without `network`, frames
