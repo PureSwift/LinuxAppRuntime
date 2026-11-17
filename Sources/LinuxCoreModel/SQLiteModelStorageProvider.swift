@@ -49,7 +49,7 @@ public actor SQLiteModelStorageProvider: ModelStorageProvider {
     }
 
     public func destroy(_ name: String) async throws {
-        databases[name] = nil
+        databases.removeValue(forKey: name)?.storage.close()
         let path = path(name)
         Self.remove(path)
         Self.remove(Self.migrating(path))
@@ -80,6 +80,7 @@ public actor SQLiteModelStorageProvider: ModelStorageProvider {
             throw ModelStoreError(.migrationRequired, message: "the store \(name) was made with another model")
         } else {
             // New, or emptied for a model it can't be migrated to.
+            databases.removeValue(forKey: name)?.storage.close()
             Self.remove(path)
             storage = try SQLiteModelStorage(database: Self.create(at: path, model: model))
         }
@@ -102,10 +103,9 @@ public actor SQLiteModelStorageProvider: ModelStorageProvider {
             Self.remove(migrating)
             throw error
         }
-        // Storages still open on the old model lose their file: SQLite
-        // refuses to go on with one that's been replaced, and their
-        // operations fail with `unavailable`.
-        databases[name] = nil
+        // Storages still open on the old model lose their file, and fail
+        // with `unavailable` from here on.
+        databases.removeValue(forKey: name)?.storage.close()
         guard rename(migrating, path) == 0 else {
             let failure = ModelStoreError(.unavailable, message: "can't replace \(path): \(String(cString: strerror(errno)))")
             Self.remove(migrating)
