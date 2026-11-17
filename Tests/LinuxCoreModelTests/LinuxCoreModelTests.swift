@@ -339,7 +339,8 @@ struct Team: Entity, Equatable {
 
     @Test func aChangedModelMigratesOrIsRefused() async throws {
         defer { try? FileManager.default.removeItem(atPath: directory) }
-        let store = try await open(provider())
+        let stores = provider()
+        let store = try await open(stores)
         try await store.insert(Self.objects)
         try await store.insert(Note(id: "n1", text: "a note"))
 
@@ -357,8 +358,8 @@ struct Team: Entity, Equatable {
             person, Self.model["Team"]!,
             EntityDescription(id: "Tag", attributes: [Attribute(id: "label", type: .string)], relationships: []),
         ])
-        let next = provider()
-        let opened = try await open(next, migrated)
+        // The same launch: the app opens its store again with a newer model.
+        let opened = try await open(stores, migrated)
         #expect(try await opened.count(FetchRequest(entity: "Person")) == 5)
         let ada = try #require(try await opened.fetch(Person.entityName, for: "ada"))
         #expect(ada.attributes["name"] == .string("Ada"))
@@ -370,7 +371,7 @@ struct Team: Entity, Equatable {
         // A storage still open on the old model has lost its file to the
         // new one: it fails, and says so.
         #expect(await failure { _ = try await store.count(FetchRequest(entity: "Note")) } == .unavailable)
-        #expect(!FileManager.default.fileExists(atPath: next.path("library") + ".migrating"))
+        #expect(!FileManager.default.fileExists(atPath: stores.path("library") + ".migrating"))
 
         // A name that's now a number can't be migrated: refused, and the
         // store is as it was.
