@@ -1,6 +1,7 @@
 import CoreModel
 import CoreModelSQLite
 import DynamicCoreModel
+import Foundation
 import RuntimeCoreModel
 import SQLite
 
@@ -15,14 +16,26 @@ import SQLite
 /// - **SQLite's errors** are the contract's: a full disk is `outOfSpace`,
 ///   a file that isn't a database `corrupted`.
 ///
+/// - **Once its store is migrated, emptied or destroyed**, it's closed:
+///   every operation fails with `unavailable`, since its file is gone.
+///
 /// `HostModelStore` gives it one operation at a time, so a batch's
 /// transaction has the connection to itself.
-public final class SQLiteModelStorage: AtomicModelStorage {
+public final class SQLiteModelStorage: AtomicModelStorage, @unchecked Sendable {
 
     public let database: SQLiteDatabase
 
+    private let lock = NSLock()
+
+    private var isClosed = false
+
     init(database: SQLiteDatabase) {
         self.database = database
+    }
+
+    /// Fails every operation from here on.
+    func close() {
+        lock.withLock { isClosed = true }
     }
 
     public func fetch(_ entity: EntityName, for id: ObjectID) async throws -> ModelData? {
@@ -110,6 +123,9 @@ public final class SQLiteModelStorage: AtomicModelStorage {
     }
 
     private func mapped<T>(_ body: () async throws -> T) async throws -> T {
+        guard !lock.withLock({ isClosed }) else {
+            throw ModelStoreError(.unavailable, message: "the store was migrated, emptied or destroyed since this storage opened it")
+        }
         do {
             return try await body()
         } catch {
