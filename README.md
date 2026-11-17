@@ -41,6 +41,12 @@ in its `documents`:
 
 ![ExampleFiles on Linux](Documentation/ExampleFiles.png)
 
+`ExampleModel` keeps to-do lists in a model store with CoreModel, kept in
+SQLite. At its second launch it reads back what's there, here two to-dos
+added to its database between launches:
+
+![ExampleModel on Linux](Documentation/ExampleModel.png)
+
 ## Modules
 
 | Module | |
