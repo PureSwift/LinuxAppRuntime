@@ -87,11 +87,12 @@ let package = Package(
         // SHA-256, for bundles' CodeResources; the D-Bus package uses it too.
         .package(url: "https://github.com/apple/swift-crypto.git", "3.0.0"..<"5.0.0"),
         // Model stores: CoreModel's SQLite backend, and the SQLite it's
-        // over, which is compiled in on Linux. The branches answer requests
-        // as CoreModel's in-memory evaluation does (PureSwift/CoreModel-SQLite#14,
-        // PureSwift/CoreModel#41), until they're released.
+        // over, which is compiled in on Linux. Branches, until they're
+        // released, that answer requests as CoreModel's in-memory evaluation
+        // does: PureSwift/CoreModel-SQLite#14, and CoreModel's master with
+        // PureSwift/CoreModel#41.
         .package(url: "https://github.com/PureSwift/CoreModel-SQLite.git", branch: "fix/evaluator-semantics"),
-        .package(url: "https://github.com/PureSwift/CoreModel.git", branch: "fix/substring-and-null-order"),
+        .package(url: "https://github.com/PureSwift/CoreModel.git", branch: "master"),
         .package(url: "https://github.com/PureSwift/SQLite.git", from: "0.2.2"),
     ],
     targets: [
