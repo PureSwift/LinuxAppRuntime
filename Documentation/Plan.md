@@ -369,7 +369,9 @@ SQLite one, CoreModel-SQLite, with SQLite compiled in, so a device needs no
   on one thread, which WebKit takes for its main thread.
 - End to end: AppRuntime's `ExampleUI` built as a `linux-arm64` slice,
   linked into `linux-app-host` and run headless with SDL's `offscreen`
-  driver, its first frame saved with `CACAO_SCREENSHOT`.
+  driver, its first frame saved with `CACAO_SCREENSHOT`. `ExampleModel`
+  the same way, launched twice on one container, with to-dos written into
+  its SQLite database between the launches: the second shows them.
 - Real BlueZ needs hardware: manual runs on a Raspberry Pi or a laptop with
   `bluetoothd`.
 
