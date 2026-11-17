@@ -50,7 +50,7 @@ host's options for a handheld:
 | `LINUXAPPRUNTIME_SCALE` | Pixels per point: 1 below 700 pixels tall, 1.5 below 1000, 2 above, so a 640 × 480 screen is 640 × 480 points and a 720 × 720 one 480 × 480 |
 | `LINUXAPPRUNTIME_CURSOR=1` | Draw a pointer: there's no mouse, and KMSDRM has no system cursor |
 | `LINUXAPPRUNTIME_FONTS` | `fonts/`, used when fontconfig isn't there |
-| `LINUXAPPRUNTIME_CONTAINER` | `conf/`: the app's files, where ports keep what's theirs |
+| `LINUXAPPRUNTIME_CONTAINER` | `conf/`: the app's files and settings, where ports keep what's theirs |
 
 ## 3. Controls
 
