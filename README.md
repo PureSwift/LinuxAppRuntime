@@ -50,6 +50,7 @@ in its `documents`:
 | `LinuxBluetooth` | `Central`, `Peripheral`, `Service`, `Characteristic`, `Descriptor` and `Advertisement` over BlueZ, through `wendylabsinc/dbus` |
 | `LinuxGraphics` | `Surface`: GLES 2.0 drawn in EGL pbuffers, loaded at run time, and read back into the player's `GLSurface` view ([plan](Documentation/Plan.md) §7) |
 | `LinuxWebKit` | `WebContent`: WPE WebKit pages, loaded at run time, drawn into shared memory and shown by the player's `WebView` view ([plan](Documentation/Plan.md) §8) |
+| `LinuxCoreModel` | `LinuxModelStore`: the app's CoreModel stores in SQLite, through AppRuntime's `HostModelStore` and CoreModel-SQLite ([plan](Documentation/Plan.md) §9) |
 | `LinuxHostApp`, `linux-app-host` | The app's `main`: the host, and Cacao's window and loop |
 | `LinuxPackager`, `linux-app` | The packager: validation, the host build, wasm2c, the install tree, PortMaster ports |
 
@@ -149,7 +150,7 @@ The bundle needs `linux-arm64` and `linux-armv7` slices (`guest.py bundle
 | Variable | |
 |---|---|
 | `LINUXAPPRUNTIME_DEBUG` | `1` logs the host's debug messages |
-| `LINUXAPPRUNTIME_CONTAINER` | An absolute path that holds the app's files (`Documents`, `Data`, `Caches`, `tmp`) and settings (`Defaults`), in place of XDG's directories |
+| `LINUXAPPRUNTIME_CONTAINER` | An absolute path that holds the app's files (`Documents`, `Data`, `Caches`, `tmp`) settings (`Defaults`) and model stores (`Stores`), in place of XDG's directories |
 | `CACAO_SCREENSHOT` | Saves the first frame to a PNG and quits |
 | `CACAO_SHOW_STATISTICS` | `1` shows Cacao's frame times |
 | `SDL_VIDEO_DRIVER` | `wayland`, `x11`, `kmsdrm`, or `offscreen` for no display |
