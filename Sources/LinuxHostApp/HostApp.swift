@@ -4,6 +4,7 @@ import CLinuxHost
 import CacaoSDL
 import Foundation
 import LinuxBluetooth
+import LinuxCoreModel
 import LinuxGraphics
 import LinuxWebKit
 import LinuxUI
@@ -26,9 +27,10 @@ public enum HostApp {
 
     /// Every module this host has: the SwiftUI player (DarwinUI, on Cacao),
     /// Bluetooth, GL surfaces and web pages, which the player shows, and
-    /// the app's files and settings.
+    /// the app's files, settings and model stores.
     public static let modules: [any HostModule.Type] = [
         DarwinUI.self, LinuxBluetooth.self, LinuxGraphics.self, LinuxWebKit.self, LinuxFiles.self, LinuxDefaults.self,
+        LinuxModelStore.self,
     ]
 
     /// The window's title: the app's name.

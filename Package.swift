@@ -72,6 +72,7 @@ let package = Package(
         .library(name: "LinuxBluetooth", targets: ["LinuxBluetooth"]),
         .library(name: "LinuxGraphics", targets: ["LinuxGraphics"]),
         .library(name: "LinuxWebKit", targets: ["LinuxWebKit"]),
+        .library(name: "LinuxCoreModel", targets: ["LinuxCoreModel"]),
         .library(name: "LinuxHostApp", targets: ["LinuxHostApp"]),
         .executable(name: "linux-app-host", targets: ["LinuxAppHost"]),
         .executable(name: "linux-app", targets: ["LinuxAppTool"]),
@@ -85,6 +86,13 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
         // SHA-256, for bundles' CodeResources; the D-Bus package uses it too.
         .package(url: "https://github.com/apple/swift-crypto.git", "3.0.0"..<"5.0.0"),
+        // Model stores: CoreModel's SQLite backend, and the SQLite it's
+        // over, which is compiled in on Linux. Both masters, until they're
+        // released: they answer requests as CoreModel's in-memory evaluation
+        // does (PureSwift/CoreModel-SQLite#14, PureSwift/CoreModel#41).
+        .package(url: "https://github.com/PureSwift/CoreModel-SQLite.git", branch: "master"),
+        .package(url: "https://github.com/PureSwift/CoreModel.git", branch: "master"),
+        .package(url: "https://github.com/PureSwift/SQLite.git", from: "0.2.2"),
     ],
     targets: [
 
@@ -138,13 +146,28 @@ let package = Package(
             swiftSettings: host
         ),
 
+        // MARK: - Model stores
+
+        // The guest's CoreModel, through the ModelStore contracts, to
+        // CoreModel-SQLite.
+        .target(
+            name: "LinuxCoreModel",
+            dependencies: [
+                "LinuxHost", runtime("DynamicCoreModel"), runtime("RuntimeCoreModel"), runtime("DynamicFiles"), runtime("DynamicRuntime"),
+                runtime("RuntimeABI"), runtime("RuntimeHost"),
+                .product(name: "CoreModelSQLite", package: "CoreModel-SQLite"),
+                .product(name: "SQLite", package: "SQLite"),
+            ],
+            swiftSettings: host
+        ),
+
         // MARK: - App
 
         // libc functions app slices need that older glibc lacks.
         .target(name: "CLinuxHost"),
         .target(
             name: "LinuxHostApp",
-            dependencies: ["LinuxHost", "LinuxUI", "LinuxBluetooth", "LinuxGraphics", "LinuxWebKit", "CLinuxHost", runtime("CRuntime"),
+            dependencies: ["LinuxHost", "LinuxUI", "LinuxBluetooth", "LinuxGraphics", "LinuxWebKit", "LinuxCoreModel", "CLinuxHost", runtime("CRuntime"),
                            .product(name: "CacaoSDL", package: "Cacao")],
             swiftSettings: host
         ),
@@ -166,7 +189,7 @@ let package = Package(
         // doesn't build Cacao.
         .target(
             name: "LinuxPackager",
-            dependencies: ["LinuxHost", "LinuxBluetooth", "LinuxGraphics", "LinuxWebKit", runtime("DynamicUI"),
+            dependencies: ["LinuxHost", "LinuxBluetooth", "LinuxGraphics", "LinuxWebKit", "LinuxCoreModel", runtime("DynamicUI"),
                            .product(name: "Crypto", package: "swift-crypto")]
         ),
         .executableTarget(
@@ -184,6 +207,12 @@ let package = Package(
         ),
         .testTarget(name: "LinuxBluetoothTests", dependencies: ["LinuxBluetooth"], swiftSettings: host),
         .testTarget(name: "LinuxGraphicsTests", dependencies: ["LinuxGraphics", runtime("DynamicGraphics")], swiftSettings: host),
+        .testTarget(
+            name: "LinuxCoreModelTests",
+            dependencies: ["LinuxCoreModel", runtime("DynamicCoreModel"), runtime("RuntimeCoreModel"),
+                           .product(name: "CoreModelSQLite", package: "CoreModel-SQLite")],
+            swiftSettings: host
+        ),
         .testTarget(name: "LinuxWebKitTests", dependencies: ["LinuxWebKit", runtime("DynamicWebKit")], swiftSettings: host),
         .testTarget(name: "LinuxPackagerTests", dependencies: ["LinuxPackager", "LinuxHostApp"]),
     ]

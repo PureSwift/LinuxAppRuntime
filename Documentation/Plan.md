@@ -92,6 +92,7 @@ timers for `schedule`.
 | `LinuxBluetooth` | `Central`, `Peripheral`, `Service`, `Characteristic`, `Descriptor`, `Advertisement` over BlueZ |
 | `LinuxGraphics` | `Surface` over EGL and GLES 2.0, loaded at run time; the player's `GLSurface` view shows it (§7) |
 | `LinuxWebKit` | `WebContent` over WPE WebKit, loaded at run time; the player's `WebView` view shows it (§8) |
+| `LinuxCoreModel` | `LinuxModelStore`: the model store over CoreModel-SQLite, through AppRuntime's `HostModelStore` (§9) |
 | `LinuxHostApp` | `main`: reads the app's keys, starts the host, and runs Cacao's SDL loop with one window showing the guest's first renderer |
 | `LinuxPackager`, `linux-app` | The packager (§11, [Packager.md](Packager.md)) |
 
@@ -275,7 +276,7 @@ WebKit, and the player draws `WebView` nodes. It follows Perry's
   - Reading files beside a bundled page only: WebKit's file-URL rules
     apply.
 
-## 9. Files and settings
+## 9. App data: files, settings and model stores
 
 `LinuxFiles` is the `Files` contract (AppRuntime's `Files.md`): AppRuntime's
 `HostFiles`, which does it all over POSIX calls, with the app's directories
@@ -311,6 +312,40 @@ it, rewritten atomically at each change.
 - **If it can't be opened**, the host logs why. Reads then find nothing,
   and writes are refused.
 
+`LinuxModelStore`, in `LinuxCoreModel`, is the model store
+(`Persistence.md`): the guest's CoreModel, through the `ModelStore`
+contracts, to AppRuntime's `HostModelStore`, which turns them back into
+CoreModel's requests for a backend. On Linux the backend is CoreModel's own
+SQLite one, CoreModel-SQLite, with SQLite compiled in, so a device needs no
+`libsqlite3`.
+
+- **A store** is `<container>/Stores/<name>.sqlite` in a container, and
+  `$XDG_DATA_HOME/<id>/Stores/<name>.sqlite` otherwise: beside the app's
+  `Documents` and `Data`, out of reach of its `Files`.
+- **The model** the store was made with is kept in it, in a table of its
+  own, so the model and the objects change together. An open with the same
+  model opens it. One that `canMigrate(from:to:)` allows (entities or
+  properties added or removed) is migrated by copying what both models
+  have into a new database, which then replaces the old one. Any other
+  fails with `migrationRequired`, or starts the store again with `.reset`.
+- **One `SQLiteDatabase` per store**, whichever of the app's storages use
+  it, since it caches what it reads and must be its file's only writer. A
+  storage still open on a model that a later open migrated from fails with
+  `unavailable`: its file is gone.
+- **A batch is one transaction**, in which each insert and delete is a
+  savepoint of its own: all of it, or none.
+- **Requests answer as CoreModel's in-memory evaluation does**, which is
+  what defines them. Comparing the two found differences on both sides,
+  fixed in PureSwift/CoreModel-SQLite#14 and PureSwift/CoreModel#41, which
+  the package uses as branches until they're released. A predicate SQL
+  can't say is evaluated in memory, over the store's objects.
+- **Indexes**: the app's, and one on each to-one relationship's column,
+  which its inverse to-many is read through. Those the app no longer
+  declares are dropped.
+- **SQLite's errors** are the contract's: a full disk is `outOfSpace`, a
+  file that isn't a database `corrupted`, one that can't be opened or read
+  `unavailable`.
+
 ## 10. Testing
 
 - `LinuxUI`: DarwinUI's tests, on Cacao (§5).
@@ -322,6 +357,11 @@ it, rewritten atomically at each change.
   contract end to end in a container, answering on the main loop.
 - `LinuxHost`'s settings: the file's path from the environment, and
   settings read again at the next launch.
+- `LinuxCoreModel`: where stores are; about 500 requests answered as
+  CoreModel's in-memory store answers them; every value there and back;
+  batches applied whole or not at all; a store kept between launches,
+  migrated, refused or emptied; indexes made and dropped; a file that isn't
+  a store; no directory. Runs on macOS and Linux.
 - `LinuxWebKit`: on Linux, in WPE: loading HTML and the events' order,
   scripts' JSON, navigations asked about and refused, back, bundle
   resources, a refused connection, remote loads without `network`, frames
@@ -329,7 +369,9 @@ it, rewritten atomically at each change.
   on one thread, which WebKit takes for its main thread.
 - End to end: AppRuntime's `ExampleUI` built as a `linux-arm64` slice,
   linked into `linux-app-host` and run headless with SDL's `offscreen`
-  driver, its first frame saved with `CACAO_SCREENSHOT`.
+  driver, its first frame saved with `CACAO_SCREENSHOT`. `ExampleModel`
+  the same way, launched twice on one container, with to-dos written into
+  its SQLite database between the launches: the second shows them.
 - Real BlueZ needs hardware: manual runs on a Raspberry Pi or a laptop with
   `bluetoothd`.
 
