@@ -46,7 +46,7 @@ AppRuntime's contracts.
 | arm64 and x86_64 Linux with glibc (Debian 13, Ubuntu 24.04+) | armv7, musl |
 | Native slices linked into the host | wasm2c (AppRuntime's shim, as on Darwin); WasmKit for development |
 | Wayland and X11 through SDL3; a headless driver for tests | Multiple windows |
-| `Renderer`, `BluetoothCentral` and friends, GL surfaces, web views, files, settings, the built-ins | Location (GeoClue), Device (UPower, sysfs), Networking (libcurl), Formatting (ICU), Motion (iio-sensor-proxy), NFC (neard) |
+| `Renderer`, `BluetoothCentral` and friends, GL surfaces, web views, files, settings, model stores, date and number formatting, the built-ins | Location (GeoClue), Device (UPower, sysfs), Networking (libcurl), Motion (iio-sensor-proxy), NFC (neard) |
 
 ## 2. Process model
 
@@ -99,6 +99,16 @@ timers for `schedule`.
 The package depends on AppRuntime without its `GuestExports` trait, like
 DarwinAppRuntime, so the slice's `rt_dispatch` and `rt_finalize` are the
 only ones linked (`HostRuntime.md` §8 in DarwinAppRuntime).
+
+Some contracts need nothing of Linux's own, and AppRuntime has them for
+every host written in Swift; this host registers them as they are:
+
+- **Formatting** (`DynamicFormatting`): AppRuntime's `RuntimeFormatting`,
+  `LocaleInfo`, `NumberFormat` and `DateFormat` over Swift Foundation,
+  which formats with ICU, so a guest doesn't link it. Foundation on Linux
+  doesn't read the POSIX environment for the user's locale, so
+  `RuntimeFormatting` does: `LC_ALL`, else `LANG`, and `LANGUAGE` for the
+  preferred languages. The time zone is `TZ`, else the system's.
 
 ## 4. Startup
 
@@ -385,8 +395,9 @@ SQLite one, CoreModel-SQLite, with SQLite compiled in, so a device needs no
    later Flatpak and AppImage, whose manifests carry the capabilities
    (`--system-talk-name=org.bluez` for `bluetooth`).
 3. **More contracts**: Location (GeoClue2), Device (UPower, sysfs),
-   Networking (libcurl or AsyncHTTPClient), Formatting (ICU), Motion
-   (iio-sensor-proxy), NFC (neard).
+   Networking (libcurl or AsyncHTTPClient), Motion (iio-sensor-proxy),
+   NFC (neard). Formatting is done: AppRuntime's `RuntimeFormatting`
+   (§3).
 4. **Player**: what DarwinUI and Cacao add: Cacao's AT-SPI bridge, input
    replay for end-to-end tests.
 
