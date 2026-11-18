@@ -45,6 +45,17 @@ import Testing
         #expect(lenient.filter { $0.severity == .error }.count == 1, "the wrong kind is still an error")
     }
 
+    /// AppRuntime's `RuntimeFormatting`, which the host registers as it is.
+    @Test func formattingIsImplemented() throws {
+        let fixture = try Fixture(contracts: [
+            ("org.pureswift.ui.Renderer", 1, "contract"),
+            ("org.pureswift.formatting.Locale", 1, "contract"),
+            ("org.pureswift.formatting.NumberFormat", 1, "contract"),
+            ("org.pureswift.formatting.DateFormat", 1, "contract"),
+        ])
+        #expect(try diagnostics(fixture).isEmpty)
+    }
+
     @Test func newerABIsAndBadNames() throws {
         let messages = try diagnostics(Fixture(identifier: "nodots", executable: "../Demo", abi: 99)).map(\.message)
         #expect(messages.contains { $0.contains("rt ABI 99") })
