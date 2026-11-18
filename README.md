@@ -53,7 +53,7 @@ added to its database between launches:
 |---|---|
 | `LinuxHost` | `AppHost` (built-ins, modules, `rt_main`), `MainLoop` and its clock, the `Bundle` built-in, `LinuxFiles` and `LinuxDefaults`, the app's files and settings in XDG's directories or a container ([plan](Documentation/Plan.md) §9), over AppRuntime's shared `RuntimeHost` (`AppInfo`, compatibility checks, `HostModule`, `Permissions`, `Application`, `HostFiles`, `HostDefaults`) |
 | `LinuxUI` | The SwiftUI player: DarwinAppRuntime's `DarwinUI`, copied by `Scripts/sync-darwinui.sh`, over Cacao's `SwiftUI` |
-| `LinuxBluetooth` | `Central`, `Peripheral`, `Service`, `Characteristic`, `Descriptor` and `Advertisement` over BlueZ, through `wendylabsinc/dbus` |
+| `LinuxBluetooth` | `BluetoothCentral`, `BluetoothPeripheral`, `BluetoothService`, `BluetoothCharacteristic`, `BluetoothDescriptor` and `BluetoothAdvertisement` over BlueZ, through `wendylabsinc/dbus` |
 | `LinuxGraphics` | `Surface`: GLES 2.0 drawn in EGL pbuffers, loaded at run time, and read back into the player's `GLSurface` view ([plan](Documentation/Plan.md) §7) |
 | `LinuxWebKit` | `WebContent`: WPE WebKit pages, loaded at run time, drawn into shared memory and shown by the player's `WebView` view ([plan](Documentation/Plan.md) §8) |
 | `LinuxCoreModel` | `LinuxModelStore`: the app's CoreModel stores in SQLite, through AppRuntime's `HostModelStore` and CoreModel-SQLite ([plan](Documentation/Plan.md) §9) |

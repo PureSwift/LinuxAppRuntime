@@ -3,14 +3,14 @@ import DBUS
 import DynamicBluetooth
 import LinuxHost
 
-/// The `Peripheral` contract over a BlueZ device (`Plan.md` §6).
+/// The `BluetoothPeripheral` contract over a BlueZ device (`Plan.md` §6).
 ///
 /// BlueZ resolves the whole GATT database when it connects, so discovery
 /// reads `GattService1`, `GattCharacteristic1` and `GattDescriptor1`
 /// objects under the device. Operations are queued and run one at a time;
 /// each reports exactly once, and a disconnect fails what's queued with
 /// `notConnected`.
-public final class LinuxPeripheral: Peripheral {
+public final class LinuxPeripheral: BluetoothPeripheral {
 
     let path: String
 
@@ -18,7 +18,7 @@ public final class LinuxPeripheral: Peripheral {
     /// outlive it.
     let hub: BlueZHub
 
-    private(set) var delegate: (any PeripheralDelegate)?
+    private(set) var delegate: (any BluetoothPeripheralDelegate)?
 
     /// Services discovered so far.
     private var discovered: [LinuxService] = []
@@ -81,7 +81,7 @@ public final class LinuxPeripheral: Peripheral {
         return state.rawValue
     }
 
-    public func setDelegate(_ delegate: (any PeripheralDelegate)?) {
+    public func setDelegate(_ delegate: (any BluetoothPeripheralDelegate)?) {
         self.delegate = delegate
     }
 
@@ -106,11 +106,11 @@ public final class LinuxPeripheral: Peripheral {
         }
     }
 
-    public func services() -> [any Service] {
+    public func services() -> [any BluetoothService] {
         discovered
     }
 
-    public func discoverCharacteristics(_ uuids: [BluetoothUUID], for service: any Service) {
+    public func discoverCharacteristics(_ uuids: [BluetoothUUID], for service: any BluetoothService) {
         guard let service = LinuxBluetooth.resolve(service, as: LinuxService.self) else { return }
         let wanted = Set(uuids.map(BlueZMapping.bluezUUID))
         enqueue { [self] done in
@@ -124,7 +124,7 @@ public final class LinuxPeripheral: Peripheral {
         }
     }
 
-    public func discoverDescriptors(for characteristic: any Characteristic) {
+    public func discoverDescriptors(for characteristic: any BluetoothCharacteristic) {
         guard let characteristic = LinuxBluetooth.resolve(characteristic, as: LinuxCharacteristic.self) else { return }
         enqueue { [self] done in
             characteristic.discovered = hub.children(of: characteristic.path, interface: BlueZInterface.descriptor, parentKey: "Characteristic")
@@ -136,7 +136,7 @@ public final class LinuxPeripheral: Peripheral {
         }
     }
 
-    public func readValue(_ characteristic: any Characteristic) {
+    public func readValue(_ characteristic: any BluetoothCharacteristic) {
         guard let characteristic = LinuxBluetooth.resolve(characteristic, as: LinuxCharacteristic.self) else { return }
         enqueue { [self] done in
             characteristic.reading = true
@@ -157,7 +157,7 @@ public final class LinuxPeripheral: Peripheral {
         }
     }
 
-    public func writeValue(_ value: [UInt8], for characteristic: any Characteristic, type: Int32) {
+    public func writeValue(_ value: [UInt8], for characteristic: any BluetoothCharacteristic, type: Int32) {
         guard let characteristic = LinuxBluetooth.resolve(characteristic, as: LinuxCharacteristic.self) else { return }
         let withResponse = type != WriteType.withoutResponse.rawValue
         enqueue { [self] done in
@@ -178,7 +178,7 @@ public final class LinuxPeripheral: Peripheral {
         }
     }
 
-    public func setNotifyValue(_ enabled: Bool, for characteristic: any Characteristic) {
+    public func setNotifyValue(_ enabled: Bool, for characteristic: any BluetoothCharacteristic) {
         guard let characteristic = LinuxBluetooth.resolve(characteristic, as: LinuxCharacteristic.self) else { return }
         enqueue { [self] done in
             gatt(characteristic.path, BlueZInterface.characteristic, enabled ? "StartNotify" : "StopNotify", [], nil) { [self] result in
@@ -200,7 +200,7 @@ public final class LinuxPeripheral: Peripheral {
         }
     }
 
-    public func readDescriptor(_ descriptor: any Descriptor) {
+    public func readDescriptor(_ descriptor: any BluetoothDescriptor) {
         guard let descriptor = LinuxBluetooth.resolve(descriptor, as: LinuxDescriptor.self) else { return }
         enqueue { [self] done in
             gatt(descriptor.path, BlueZInterface.descriptor, "ReadValue", [.options([:])], "a{sv}") { [self] result in
@@ -219,7 +219,7 @@ public final class LinuxPeripheral: Peripheral {
         }
     }
 
-    public func writeDescriptor(_ value: [UInt8], for descriptor: any Descriptor) {
+    public func writeDescriptor(_ value: [UInt8], for descriptor: any BluetoothDescriptor) {
         guard let descriptor = LinuxBluetooth.resolve(descriptor, as: LinuxDescriptor.self) else { return }
         enqueue { [self] done in
             gatt(descriptor.path, BlueZInterface.descriptor, "WriteValue", [.byteArray(value), .options([:])], "aya{sv}") { [self] result in

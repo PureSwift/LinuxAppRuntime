@@ -4,7 +4,7 @@ import DynamicBluetooth
 import DynamicRuntime
 
 /// A `GattService1` object.
-public final class LinuxService: Service {
+public final class LinuxService: BluetoothService {
 
     let path: String
 
@@ -31,11 +31,11 @@ public final class LinuxService: Service {
         object["Primary"]?.boolValue ?? true
     }
 
-    public func characteristics() -> [any Characteristic] {
+    public func characteristics() -> [any BluetoothCharacteristic] {
         discovered
     }
 
-    public func peripheral() -> any Peripheral {
+    public func peripheral() -> any BluetoothPeripheral {
         hub.peripheral(object["Device"]?.stringValue ?? Self.parent(of: path))
     }
 
@@ -45,7 +45,7 @@ public final class LinuxService: Service {
 }
 
 /// A `GattCharacteristic1` object.
-public final class LinuxCharacteristic: Characteristic {
+public final class LinuxCharacteristic: BluetoothCharacteristic {
 
     let path: String
 
@@ -89,11 +89,11 @@ public final class LinuxCharacteristic: Characteristic {
         notifying ?? object["Notifying"]?.boolValue ?? false
     }
 
-    public func descriptors() -> [any Descriptor] {
+    public func descriptors() -> [any BluetoothDescriptor] {
         discovered
     }
 
-    public func service() -> any Service {
+    public func service() -> any BluetoothService {
         hub.service(object["Service"]?.stringValue ?? LinuxService.parent(of: path))
     }
 
@@ -107,7 +107,7 @@ public final class LinuxCharacteristic: Characteristic {
 }
 
 /// A `GattDescriptor1` object.
-public final class LinuxDescriptor: Descriptor {
+public final class LinuxDescriptor: BluetoothDescriptor {
 
     let path: String
 
@@ -134,13 +134,13 @@ public final class LinuxDescriptor: Descriptor {
         lastValue ?? object["Value"]?.bytes
     }
 
-    public func characteristic() -> any Characteristic {
+    public func characteristic() -> any BluetoothCharacteristic {
         hub.characteristic(object["Characteristic"]?.stringValue ?? LinuxService.parent(of: path))
     }
 }
 
 /// What a device advertised, as BlueZ has it when it's reported.
-public final class LinuxAdvertisement: Advertisement {
+public final class LinuxAdvertisement: BluetoothAdvertisement {
 
     let device: [String: DBusValue]
 
