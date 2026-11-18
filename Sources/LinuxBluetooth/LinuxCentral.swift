@@ -3,7 +3,7 @@ import DBUS
 import DynamicBluetooth
 import LinuxHost
 
-/// The `Central` contract over BlueZ (`Plan.md` §6).
+/// The `BluetoothCentral` contract over BlueZ (`Plan.md` §6).
 ///
 /// - Authorization is always `allowed`: desktop Linux has no prompt, and
 ///   the sandbox's `bluetooth` capability gates the contract itself.
@@ -14,14 +14,14 @@ import LinuxHost
 /// - Connection timeouts are main-loop timers; BlueZ's own is long.
 ///
 /// Every call that reports through the delegate reports exactly once.
-public final class LinuxCentral: Central {
+public final class LinuxCentral: BluetoothCentral {
 
     struct ScanRequest {
         var services: [BluetoothUUID]
         var allowDuplicates: Bool
     }
 
-    let delegate: any CentralDelegate
+    let delegate: any BluetoothCentralDelegate
 
     let hub: BlueZHub
 
@@ -39,7 +39,7 @@ public final class LinuxCentral: Central {
 
     private var reportedState: CentralState?
 
-    init(delegate: any CentralDelegate, hub: BlueZHub) {
+    init(delegate: any BluetoothCentralDelegate, hub: BlueZHub) {
         self.delegate = delegate
         self.hub = hub
     }
@@ -59,11 +59,11 @@ public final class LinuxCentral: Central {
         BluetoothAuthorization.allowed.rawValue
     }
 
-    public static func make(_ delegate: any CentralDelegate) -> LinuxCentral {
+    public static func make(_ delegate: any BluetoothCentralDelegate) -> LinuxCentral {
         make(delegate, hub: .shared)
     }
 
-    static func make(_ delegate: any CentralDelegate, hub: BlueZHub) -> LinuxCentral {
+    static func make(_ delegate: any BluetoothCentralDelegate, hub: BlueZHub) -> LinuxCentral {
         let central = LinuxCentral(delegate: delegate, hub: hub)
         hub.add(central)
         LinuxBluetooth.post { [weak central] in
@@ -145,7 +145,7 @@ public final class LinuxCentral: Central {
 
     // MARK: Connections
 
-    public func connect(_ peripheral: any Peripheral, timeout: Int32) {
+    public func connect(_ peripheral: any BluetoothPeripheral, timeout: Int32) {
         guard let peripheral = LinuxBluetooth.resolve(peripheral, as: LinuxPeripheral.self) else {
             HostLog.warning("connect: not a peripheral of this host")
             return
@@ -188,7 +188,7 @@ public final class LinuxCentral: Central {
         }
     }
 
-    public func cancelConnection(_ peripheral: any Peripheral) {
+    public func cancelConnection(_ peripheral: any BluetoothPeripheral) {
         guard let peripheral = LinuxBluetooth.resolve(peripheral, as: LinuxPeripheral.self) else { return }
         let path = peripheral.path
         if let attempt = connecting.removeValue(forKey: path) {
@@ -217,11 +217,11 @@ public final class LinuxCentral: Central {
         }
     }
 
-    public func retrievePeripherals(_ identifiers: [String]) -> [any Peripheral] {
+    public func retrievePeripherals(_ identifiers: [String]) -> [any BluetoothPeripheral] {
         identifiers.compactMap { hub.devicePath(address: $0).map(hub.peripheral) }
     }
 
-    public func retrieveConnectedPeripherals(_ services: [BluetoothUUID]) -> [any Peripheral] {
+    public func retrieveConnectedPeripherals(_ services: [BluetoothUUID]) -> [any BluetoothPeripheral] {
         let wanted = Set(services.map(BlueZMapping.bluezUUID))
         return hub.devicePaths.filter { path in
             guard let device = hub.properties(path, BlueZInterface.device), device["Connected"]?.boolValue == true else {
