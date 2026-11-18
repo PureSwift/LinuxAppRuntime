@@ -10,26 +10,26 @@ public enum LinuxBluetooth: HostModule {
 
     public static var contracts: [ContractDescriptor] {
         [
-            CentralProxy.descriptor,
-            CentralDelegateProxy.descriptor,
-            PeripheralProxy.descriptor,
-            PeripheralDelegateProxy.descriptor,
-            ServiceProxy.descriptor,
-            CharacteristicProxy.descriptor,
-            DescriptorProxy.descriptor,
-            AdvertisementProxy.descriptor,
+            BluetoothCentralProxy.descriptor,
+            BluetoothCentralDelegateProxy.descriptor,
+            BluetoothPeripheralProxy.descriptor,
+            BluetoothPeripheralDelegateProxy.descriptor,
+            BluetoothServiceProxy.descriptor,
+            BluetoothCharacteristicProxy.descriptor,
+            BluetoothDescriptorProxy.descriptor,
+            BluetoothAdvertisementProxy.descriptor,
         ]
     }
 
     public static func register(in registrar: some ContractRegistrar) {
-        CentralProxy.register(LinuxCentral.self, in: registrar)
-        PeripheralProxy.register(LinuxPeripheral.self, in: registrar)
-        ServiceProxy.register(LinuxService.self, in: registrar)
-        CharacteristicProxy.register(LinuxCharacteristic.self, in: registrar)
-        DescriptorProxy.register(LinuxDescriptor.self, in: registrar)
-        AdvertisementProxy.register(LinuxAdvertisement.self, in: registrar)
-        CentralDelegateProxy.registerInterface(in: registrar)
-        PeripheralDelegateProxy.registerInterface(in: registrar)
+        BluetoothCentralProxy.register(LinuxCentral.self, in: registrar)
+        BluetoothPeripheralProxy.register(LinuxPeripheral.self, in: registrar)
+        BluetoothServiceProxy.register(LinuxService.self, in: registrar)
+        BluetoothCharacteristicProxy.register(LinuxCharacteristic.self, in: registrar)
+        BluetoothDescriptorProxy.register(LinuxDescriptor.self, in: registrar)
+        BluetoothAdvertisementProxy.register(LinuxAdvertisement.self, in: registrar)
+        BluetoothCentralDelegateProxy.registerInterface(in: registrar)
+        BluetoothPeripheralDelegateProxy.registerInterface(in: registrar)
     }
 
     /// Desktop Linux has no Bluetooth prompt: a declared `bluetooth`
