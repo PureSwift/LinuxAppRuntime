@@ -167,7 +167,7 @@ let package = Package(
         .target(name: "CLinuxHost"),
         .target(
             name: "LinuxHostApp",
-            dependencies: ["LinuxHost", "LinuxUI", "LinuxBluetooth", "LinuxGraphics", "LinuxWebKit", "LinuxCoreModel", "CLinuxHost", runtime("CRuntime"),
+            dependencies: ["LinuxHost", "LinuxUI", "LinuxBluetooth", "LinuxGraphics", "LinuxWebKit", "LinuxCoreModel", "CLinuxHost", runtime("CRuntime"), runtime("RuntimeFormatting"),
                            .product(name: "CacaoSDL", package: "Cacao")],
             swiftSettings: host
         ),
@@ -189,7 +189,7 @@ let package = Package(
         // doesn't build Cacao.
         .target(
             name: "LinuxPackager",
-            dependencies: ["LinuxHost", "LinuxBluetooth", "LinuxGraphics", "LinuxWebKit", "LinuxCoreModel", runtime("DynamicUI"),
+            dependencies: ["LinuxHost", "LinuxBluetooth", "LinuxGraphics", "LinuxWebKit", "LinuxCoreModel", runtime("RuntimeFormatting"), runtime("DynamicUI"),
                            .product(name: "Crypto", package: "swift-crypto")]
         ),
         .executableTarget(

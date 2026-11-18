@@ -7,16 +7,17 @@ import LinuxWebKit
 import LinuxHost
 import DynamicUI
 import RuntimeABI
+import RuntimeFormatting
 
 /// What this host implements: the built-ins and its modules' contracts.
 public enum HostContracts {
 
     /// The modules `linux-app-host` registers (`HostApp.modules`): the
     /// player's contracts, without building the player, Bluetooth,
-    /// graphics, web views, files, settings and model stores.
+    /// graphics, web views, files, settings, model stores and formatting.
     nonisolated(unsafe) public static let modules: [any HostModule.Type] = [
         PlayerContracts.self, LinuxBluetooth.self, LinuxGraphics.self, LinuxWebKit.self, LinuxFiles.self, LinuxDefaults.self,
-        LinuxModelStore.self,
+        LinuxModelStore.self, HostFormattingModule.self,
     ]
 
     public static var provided: [String: ContractDescriptor] {

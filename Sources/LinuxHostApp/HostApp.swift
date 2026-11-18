@@ -8,6 +8,7 @@ import LinuxCoreModel
 import LinuxGraphics
 import LinuxWebKit
 import LinuxUI
+import RuntimeFormatting
 
 /// The app's `main` (`Plan.md` §4): finds the app's bundle, checks and
 /// prepares the app, calls `rt_main`, and runs Cacao's main loop with a
@@ -26,11 +27,12 @@ import LinuxUI
 public enum HostApp {
 
     /// Every module this host has: the SwiftUI player (DarwinUI, on Cacao),
-    /// Bluetooth, GL surfaces and web pages, which the player shows, and
-    /// the app's files, settings and model stores.
+    /// Bluetooth, GL surfaces and web pages, which the player shows, the
+    /// app's files, settings and model stores, and AppRuntime's date and
+    /// number formatting over Swift Foundation.
     public static let modules: [any HostModule.Type] = [
         DarwinUI.self, LinuxBluetooth.self, LinuxGraphics.self, LinuxWebKit.self, LinuxFiles.self, LinuxDefaults.self,
-        LinuxModelStore.self,
+        LinuxModelStore.self, HostFormattingModule.self,
     ]
 
     /// The window's title: the app's name.
