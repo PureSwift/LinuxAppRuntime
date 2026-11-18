@@ -46,7 +46,7 @@ AppRuntime's contracts.
 | arm64 and x86_64 Linux with glibc (Debian 13, Ubuntu 24.04+) | armv7, musl |
 | Native slices linked into the host | wasm2c (AppRuntime's shim, as on Darwin); WasmKit for development |
 | Wayland and X11 through SDL3; a headless driver for tests | Multiple windows |
-| `Renderer`, Bluetooth `Central` and friends, GL surfaces, web views, files, settings, the built-ins | Location (GeoClue), Device (UPower, sysfs), Networking (libcurl), Formatting (ICU), Motion (iio-sensor-proxy), NFC (neard) |
+| `Renderer`, `BluetoothCentral` and friends, GL surfaces, web views, files, settings, the built-ins | Location (GeoClue), Device (UPower, sysfs), Networking (libcurl), Formatting (ICU), Motion (iio-sensor-proxy), NFC (neard) |
 
 ## 2. Process model
 
@@ -89,7 +89,7 @@ timers for `schedule`.
 |---|---|
 | `LinuxHost` | `AppHost` (built-ins, modules, `rt_main`), `MainLoop`, `MainLoopClock`, the `Bundle` built-in, and `LinuxFiles` and `LinuxDefaults` (§9); over AppRuntime's `RuntimeHost`, which every host shares: `AppInfo` (the bundle's `Info.plist` keys), the compatibility checks, `HostModule`, the `Permissions` and `Application` built-ins, `HostFiles` and `HostDefaults` |
 | `LinuxUI` | The SwiftUI player: DarwinAppRuntime's `DarwinUI`, copied by `Scripts/sync-darwinui.sh`, over Cacao's `SwiftUI` and `Combine` modules; `Host.swift` gives it the logger and bundle it takes from its host |
-| `LinuxBluetooth` | `Central`, `Peripheral`, `Service`, `Characteristic`, `Descriptor`, `Advertisement` over BlueZ |
+| `LinuxBluetooth` | `BluetoothCentral`, `BluetoothPeripheral`, `BluetoothService`, `BluetoothCharacteristic`, `BluetoothDescriptor`, `BluetoothAdvertisement` over BlueZ |
 | `LinuxGraphics` | `Surface` over EGL and GLES 2.0, loaded at run time; the player's `GLSurface` view shows it (§7) |
 | `LinuxWebKit` | `WebContent` over WPE WebKit, loaded at run time; the player's `WebView` view shows it (§8) |
 | `LinuxCoreModel` | `LinuxModelStore`: the model store over CoreModel-SQLite, through AppRuntime's `HostModelStore` (§9) |
@@ -159,14 +159,14 @@ contract logic is tested with a fake bus.
 | `scan` | `SetDiscoveryFilter({Transport: le, UUIDs, DuplicateData})`, `StartDiscovery`; a device is reported when it appears or its `RSSI`, `ManufacturerData` or `ServiceData` changes, once per scan unless duplicates are allowed; services filtered on the host too, since cached devices skip BlueZ's filter |
 | `connect` | `Device1.Connect`; `didConnect` once `Connected` and `ServicesResolved`; the timeout is a main-loop timer that disconnects |
 | `cancelConnection` | `Device1.Disconnect`, `didDisconnect` with `0` |
-| `retrievePeripherals` | Devices by address (`Peripheral.identifier`) |
+| `retrievePeripherals` | Devices by address (`BluetoothPeripheral.identifier`) |
 | `retrieveConnectedPeripherals` | Connected devices with any of the services in `UUIDs` |
 | `discoverServices`, `discoverCharacteristics`, `discoverDescriptors` | BlueZ resolves the database on connection: the `GattService1`, `GattCharacteristic1` and `GattDescriptor1` objects under the device |
 | `readValue`, `writeValue` | `ReadValue({})`, `WriteValue(value, {type: request / command})` |
 | `setNotifyValue` | `StartNotify` / `StopNotify`; values arrive as `PropertiesChanged` of `Value` |
 | `readRSSI` | `Device1.RSSI` (BlueZ reports it while discovering) |
 | `maximumWriteLength` | `GattCharacteristic1.MTU` − 3 without response, 512 with |
-| `Advertisement` | `Name`, `ManufacturerData` (company ID first, little-endian), `UUIDs`, `ServiceData`, `TxPower` |
+| `BluetoothAdvertisement` | `Name`, `ManufacturerData` (company ID first, little-endian), `UUIDs`, `ServiceData`, `TxPower` |
 
 GATT operations are queued per peripheral, and every call gets exactly one
 callback; a disconnect fails what's queued with `notConnected`. BlueZ
