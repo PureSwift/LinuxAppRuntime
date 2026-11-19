@@ -29,27 +29,13 @@ public enum HostContracts {
     public static let capabilities: Set<Capability> = [.bluetooth, .graphics, .network]
 }
 
-/// How the guest's code gets into the app (`Packager.md` §2).
-public enum Engine: String, CaseIterable, Sendable {
-    /// The bundle's sealed `libapp.a` for the target.
-    case slice
-    /// `App.wasm` translated to C by AppRuntime's wasm2c shim.
-    case wasm2c
-
-    /// A slice if the bundle has one, else wasm2c.
-    public static func preferred(for bundle: UniversalBundle, target: LinuxTarget) -> Engine {
-        bundle.slice(target) != nil ? .slice : .wasm2c
-    }
-}
-
-/// The checks of `Packager.md` §1.
+/// The checks of `Packager.md` §1, which install makes before it copies an
+/// app. The runner makes the ABI and contract checks again at each launch.
 public struct Validator {
 
     public var bundle: UniversalBundle
 
     public var target: LinuxTarget
-
-    public var engine: Engine
 
     /// Missing contracts warn instead of failing; the guest sees them as
     /// absent.
@@ -57,17 +43,16 @@ public struct Validator {
 
     public var provided: [String: ContractDescriptor] = HostContracts.provided
 
-    public init(bundle: UniversalBundle, target: LinuxTarget, engine: Engine) {
+    public init(bundle: UniversalBundle, target: LinuxTarget) {
         self.bundle = bundle
         self.target = target
-        self.engine = engine
     }
 
     public func validate() -> [Diagnostic] {
         var diagnostics: [Diagnostic] = []
         let info = bundle.info
 
-        if !Self.isIdentifier(info.identifier) {
+        if !InstalledApps.isIdentifier(info.identifier) {
             diagnostics.append(.error("CFBundleIdentifier \"\(info.identifier)\" isn't a reverse-DNS identifier"))
         }
         if !Self.isFileName(bundle.executable) {
@@ -88,36 +73,23 @@ public struct Validator {
                 diagnostics.append(.warning("\(contract.name) is version \(descriptor.version) on Linux; the app was built against \(contract.version)"))
             }
         }
+        if !FileManager.default.fileExists(atPath: bundle.url.appendingPathComponent("_CodeSignature/CodeResources").path) {
+            diagnostics.append(.error("the bundle isn't signed: it has no _CodeSignature/CodeResources, which the runner checks its library against"))
+        }
         for problem in bundle.codeResourceProblems() {
             diagnostics.append(.error("the bundle doesn't match its CodeResources: \(problem)"))
         }
-        switch engine {
-        case .slice:
-            if let slice = bundle.slice(target) {
-                for problem in SliceInspector.problems(slice, target: target) {
-                    diagnostics.append(.error("\(target.rawValue) slice: \(problem)"))
-                }
-            } else {
-                diagnostics.append(.error("the bundle has no \(target.rawValue) slice; use --engine wasm2c"))
+        if let slice = bundle.slice(target) {
+            for problem in SliceInspector.problems(slice, target: target) {
+                diagnostics.append(.error("\(target.rawValue) slice: \(problem)"))
             }
-        case .wasm2c:
-            if bundle.wasm == nil {
-                diagnostics.append(.error("the bundle has no wasm32/App.wasm"))
-            }
+        } else {
+            diagnostics.append(.error("the bundle has no \(target.rawValue) slice (\(target.sharedLibrary))"))
         }
         for capability in info.capabilities.subtracting(HostContracts.capabilities).sorted(by: { $0.rawValue < $1.rawValue }) {
             diagnostics.append(.warning("the app declares \(capability.rawValue), which the Linux host doesn't support yet"))
         }
         return diagnostics
-    }
-
-    /// `org.example.App`: two or more dot-separated parts of letters,
-    /// digits, `-` and `_`.
-    static func isIdentifier(_ value: String) -> Bool {
-        let parts = value.split(separator: ".", omittingEmptySubsequences: false)
-        return parts.count >= 2 && parts.allSatisfy { part in
-            !part.isEmpty && part.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") }
-        }
     }
 
     static func isFileName(_ value: String) -> Bool {
@@ -126,51 +98,35 @@ public struct Validator {
     }
 }
 
-/// Reads a slice's archive: every ELF object in it must be for the target.
+/// Reads a slice's `libapp.so`: a shared library for the target.
+/// `guest.py` checked the rest when it built it: what it leaves undefined,
+/// what it exports, and that it names no other library.
 public enum SliceInspector {
 
-    public static func problems(_ archive: URL, target: LinuxTarget) -> [String] {
-        guard let data = FileManager.default.contents(atPath: archive.path) else {
-            return ["can't read \(archive.path)"]
+    public static func problems(_ library: URL, target: LinuxTarget) -> [String] {
+        guard let handle = FileHandle(forReadingAtPath: library.path) else {
+            return ["can't read \(library.lastPathComponent)"]
         }
-        let machines: [UInt16]
-        do {
-            machines = try elfMachines(Array(data))
-        } catch {
-            return [error.message]
+        defer { try? handle.close() }
+        let header = Array((try? handle.read(upToCount: 20)) ?? Data())
+        guard header.count == 20, header.starts(with: [0x7F, 0x45, 0x4C, 0x46]) else {
+            return ["\(library.lastPathComponent) isn't an ELF file"]
         }
-        if machines.isEmpty {
-            return ["the archive has no ELF objects"]
+        var problems: [String] = []
+        let elfClass = header[4], endian = header[5]
+        let expectedClass: UInt8 = target == .armv7 ? 1 : 2
+        if elfClass != expectedClass || endian != 1 {
+            problems.append("it's \(elfClass == 1 ? "32" : "64")-bit\(endian == 1 ? "" : " big-endian"), not as \(target.machine) is")
         }
-        let wrong = Set(machines.filter { $0 != target.elfMachine })
-        return wrong.isEmpty ? [] : ["objects are for ELF machine \(wrong.sorted()), not \(target.elfMachine) (\(target.machine))"]
-    }
-
-    /// `e_machine` of each ELF member of a `!<arch>` archive.
-    static func elfMachines(_ bytes: [UInt8]) throws(PackagerError) -> [UInt16] {
-        let magic = Array("!<arch>\n".utf8)
-        guard bytes.starts(with: magic) else {
-            throw PackagerError("not an ar archive")
+        let type = UInt16(header[16]) | UInt16(header[17]) << 8
+        if type != 3 {
+            problems.append("it isn't a shared library (ELF type \(type))")
         }
-        var machines: [UInt16] = []
-        var offset = magic.count
-        while offset + 60 <= bytes.count {
-            let header = bytes[offset..<offset + 60]
-            guard header.suffix(2).elementsEqual([0x60, 0x0A]) else {
-                throw PackagerError("malformed archive member at \(offset)")
-            }
-            let sizeField = String(decoding: header.dropFirst(48).prefix(10), as: UTF8.self).trimmingCharacters(in: .whitespaces)
-            guard let size = Int(sizeField), offset + 60 + size <= bytes.count else {
-                throw PackagerError("malformed archive member size at \(offset)")
-            }
-            let body = bytes[(offset + 60)..<(offset + 60 + size)]
-            if body.count >= 20, body.starts(with: [0x7F, 0x45, 0x4C, 0x46]) {
-                let start = body.startIndex
-                machines.append(UInt16(body[start + 18]) | UInt16(body[start + 19]) << 8)
-            }
-            offset += 60 + size + (size % 2)
+        let machine = UInt16(header[18]) | UInt16(header[19]) << 8
+        if machine != target.elfMachine {
+            problems.append("it's for ELF machine \(machine), not \(target.elfMachine) (\(target.machine))")
         }
-        return machines
+        return problems
     }
 }
 
