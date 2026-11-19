@@ -20,64 +20,33 @@ struct BundleOptions: ParsableArguments {
     @Argument(help: "The universal bundle, from guest.py bundle.")
     var bundle: String
 
-    @Option(help: "linux-arm64 or linux-x86_64; this machine's by default.")
+    @Option(help: "linux-arm64, linux-x86_64 or linux-armv7; this machine's by default.")
     var target: String?
-
-    @Option(help: "slice or wasm2c; a slice if the bundle has one.")
-    var engine: String?
 
     @Flag(help: "Warn about contracts this host lacks instead of failing; the app sees them as absent.")
     var allowMissingContracts = false
 
-    @Option(help: "LinuxAppRuntime's source; LINUXAPPRUNTIME_PATH, or where linux-app was built from.")
-    var hostPackage: String?
-
-    @Option(help: "AppRuntime's checkout, for wasm2c; APPRUNTIME_PATH, or the one SwiftPM resolves.")
-    var appruntime: String?
-
-    @Option(help: "The work directory for generated host packages and builds.")
-    var work = ".build/linux-app"
-
-        @Flag(name: .shortAndLong, help: "Show the commands the packager runs.")
+    @Flag(name: .shortAndLong, help: "Show the commands the packager runs.")
     var verbose = false
 
-    func load() throws -> (UniversalBundle, LinuxTarget, Engine) {
+    func load() throws -> (UniversalBundle, LinuxTarget) {
         let bundle = try UniversalBundle(url: URL(fileURLWithPath: self.bundle))
-        let target: LinuxTarget
         if let name = self.target {
             guard let named = LinuxTarget(rawValue: name) else {
                 throw ValidationError("unknown target \(name); one of \(LinuxTarget.allCases.map(\.rawValue).joined(separator: ", "))")
             }
-            target = named
-        } else {
-            guard let native = LinuxTarget.native else {
-                throw ValidationError("this machine isn't a Linux target; pass --target")
-            }
-            target = native
+            return (bundle, named)
         }
-        let engine: Engine
-        if let name = self.engine {
-            guard let named = Engine(rawValue: name) else {
-                throw ValidationError("unknown engine \(name); slice or wasm2c")
-            }
-            engine = named
-        } else {
-            engine = .preferred(for: bundle, target: target)
+        guard let native = LinuxTarget.native else {
+            throw ValidationError("this machine isn't a Linux target; pass --target")
         }
-        return (bundle, target, engine)
+        return (bundle, native)
     }
 
-    func packager(configuration: String = "release", buildArguments: [String] = []) throws -> Packager {
-        let (bundle, target, engine) = try load()
-        if let native = LinuxTarget.native, native != target, buildArguments.isEmpty {
-            throw ValidationError("building for \(target.rawValue) on \(native.rawValue) isn't supported yet")
-        }
-        var options = Packager.Options(target: target, engine: engine, hostPackage: try HostPackage.locate(hostPackage))
-        options.configuration = configuration
+    func packager() throws -> Packager {
+        let (bundle, target) = try load()
+        var options = Packager.Options(target: target)
         options.allowMissingContracts = allowMissingContracts
-        options.appRuntime = Wasm2c.locate(appruntime)
-        options.buildArguments = buildArguments
-        options.workRoot = URL(fileURLWithPath: work)
         return Packager(bundle: bundle, options: options, runner: CommandRunner(verbose: verbose))
     }
 }
@@ -97,35 +66,33 @@ extension LinuxApp {
         @OptionGroup var options: BundleOptions
 
         func run() throws {
-            let (bundle, target, engine) = try options.load()
-            var validator = Validator(bundle: bundle, target: target, engine: engine)
+            let (bundle, target) = try options.load()
+            var validator = Validator(bundle: bundle, target: target)
             validator.allowMissingContracts = options.allowMissingContracts
             let diagnostics = validator.validate()
             report(diagnostics)
             if diagnostics.contains(where: { $0.severity == .error }) {
                 throw ExitCode.failure
             }
-            print("ok: \(bundle.info.identifier) for \(target.rawValue) with \(engine.rawValue)")
+            print("ok: \(bundle.info.identifier) for \(target.rawValue)")
         }
     }
 
     struct Package: ParsableCommand {
 
-        static let configuration = CommandConfiguration(abstract: "Build the app and write its install tree.")
+        static let configuration = CommandConfiguration(
+            abstract: "Write the app's install tree: its bundle thinned to one target, and its desktop entry.")
 
         @OptionGroup var options: BundleOptions
 
-        @Option(help: "The install tree's directory; .build/linux-app/<id>/<target>/out by default.")
+        @Option(help: "The install tree's directory; .build/linux-app/<id>/<target> by default.")
         var output: String?
-
-        @Option(help: "release or debug.")
-        var configuration = "release"
 
         @Flag(help: "Also write <id>-<version>-<target>.tar.gz next to the tree.")
         var archive = false
 
         func run() throws {
-            var packager = try options.packager(configuration: configuration)
+            var packager = try options.packager()
             packager.options.output = output.map { URL(fileURLWithPath: $0) }
             packager.options.archive = archive
             let result = try packager.package()
@@ -139,39 +106,52 @@ extension LinuxApp {
 
     struct Install: ParsableCommand {
 
-        static let configuration = CommandConfiguration(abstract: "Package the app and install it for the user.")
+        static let configuration = CommandConfiguration(
+            abstract: "Install the app for the user, to run in the installed runner. Nothing is built.")
 
         @OptionGroup var options: BundleOptions
 
         @Option(help: "Where to install; ~/.local by default.")
         var prefix: String?
 
+        @Option(help: "The runner the desktop entry starts; LINUXAPPRUNTIME_RUNNER, the one next to linux-app, or linux-app-host on PATH.")
+        var runner: String?
+
         func run() throws {
             let packager = try options.packager()
+            let program = try Runner.locate(runner)
             let prefix = prefix.map { URL(fileURLWithPath: $0) }
                 ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local")
-            let result = try packager.install(prefix: prefix)
+            let result = try packager.install(prefix: prefix, runner: program)
             report(result.diagnostics)
-            print(result.executable.path)
+            print(result.bundle.path)
         }
     }
 
     struct Run: ParsableCommand {
 
-        static let configuration = CommandConfiguration(abstract: "Package a debug build and run it.")
+        static let configuration = CommandConfiguration(abstract: "Check the app and run it in the runner, as it is.")
 
         @OptionGroup var options: BundleOptions
 
-        @Argument(parsing: .postTerminator, help: "Arguments for the app's host, after --.")
+        @Option(help: "The runner; as for install.")
+        var runner: String?
+
+        @Argument(parsing: .postTerminator, help: "More arguments for the runner, after --: a URL to open.")
         var arguments: [String] = []
 
         func run() throws {
-            let packager = try options.packager(configuration: "debug")
-            let result = try packager.package()
-            report(result.diagnostics)
+            let (bundle, target) = try options.load()
+            var validator = Validator(bundle: bundle, target: target)
+            validator.allowMissingContracts = options.allowMissingContracts
+            let diagnostics = validator.validate()
+            report(diagnostics)
+            if diagnostics.contains(where: { $0.severity == .error }) {
+                throw ExitCode.failure
+            }
             let process = Process()
-            process.executableURL = result.executable
-            process.arguments = arguments
+            process.executableURL = try Runner.locate(runner)
+            process.arguments = ["--bundle", bundle.url.path] + arguments
             try process.run()
             process.waitUntilExit()
             throw ExitCode(process.terminationStatus)
@@ -210,12 +190,21 @@ extension LinuxApp {
         @Option(help: "A screenshot; the app's icon by default.")
         var screenshot: String?
 
+        @Option(help: "LinuxAppRuntime's source, which the port's runner is built from; LINUXAPPRUNTIME_PATH, or where linux-app was built from.")
+        var hostPackage: String?
+
+        @Option(help: "The runner's build directory.")
+        var work = ".build/linux-app/runner"
+
         func run() throws {
             let environment = ProcessInfo.processInfo.environment
             let destination = destination ?? environment["LINUXAPPRUNTIME_SWIFT_DESTINATION"]
-            // SwiftPM's default build system ignores destination files.
-            let packager = try options.packager(buildArguments: destination.map { ["--build-system", "native", "--destination", $0] } ?? [])
+            let packager = try options.packager()
             var portOptions = PortMasterPort.Options(output: URL(fileURLWithPath: output))
+            portOptions.source = try Runner.source(hostPackage)
+            portOptions.scratch = URL(fileURLWithPath: work)
+            // SwiftPM's default build system ignores destination files.
+            portOptions.buildArguments = destination.map { ["--build-system", "native", "--destination", $0] } ?? []
             portOptions.libraries = (libraries ?? environment["LINUXAPPRUNTIME_PORT_LIBS"]).map { URL(fileURLWithPath: $0) }
             portOptions.fonts = URL(fileURLWithPath: fonts)
             portOptions.porters = porter
