@@ -2,27 +2,29 @@
 
 The Linux host for [AppRuntime](https://github.com/PureSwift/AppRuntime)
 apps. An AppRuntime app is guest code only: a universal bundle with
-`App.wasm` and native `libapp.a` slices. This repository turns one into a
-Linux program:
+`App.wasm` and a `libapp.so` for each Linux target. This repository runs
+one on Linux:
 
-- the **host runtime**: `main`, a main loop for timers and D-Bus, the
-  runtime core behind `rt.h`, and the built-in contracts;
+- the **runner**, `linux-app-host`: one program every app runs in, which
+  loads the app's `libapp.so`; `main`, a main loop for timers and D-Bus,
+  the runtime core behind `rt.h`, and the built-in contracts;
 - the **SwiftUI player**: DarwinAppRuntime's renderer of the SwiftUI
   frontend's render IR, on [Cacao](https://github.com/PureSwift/Cacao),
   SwiftUI for Linux;
 - **Bluetooth** LE central over BlueZ's D-Bus API;
 - **GL surfaces**: OpenGL ES 2.0 in a SwiftUI view, over EGL;
 - **web views**: WPE WebKit pages in a SwiftUI view;
-- the **packager**, `linux-app`, which turns a universal bundle into an
-  installable app.
+- the **packager**, `linux-app`, which installs an app for the runner by
+  copying files: its bundle thinned to this machine's `libapp.so`. Nothing
+  is compiled or linked, so a device needs the runner and no toolchain.
 
 **Status:** AppRuntime's `ExampleUI`, built as a `linux-arm64` slice, runs
 in the player on Cacao, headless under SDL's offscreen driver, and the
 player passes DarwinUI's own tests there. PortMaster ports don't build on
 Cacao yet ([PortMaster.md](Documentation/PortMaster.md) §7). The Bluetooth
 contracts are tested against a fake BlueZ and haven't run against real
-hardware. `linux-app` packages `ExampleUI` from its bundle, as a slice or
-through wasm2c, and the packaged app runs. See the
+hardware. The runner loads `ExampleUI`, `ExampleGL` and `ExampleModel`
+from their bundles, and `linux-app` installs them for it. See the
 [plan](Documentation/Plan.md) and the [packager](Documentation/Packager.md).
 
 ![ExampleUI on Linux](Documentation/ExampleUI.png)
@@ -58,7 +60,7 @@ added to its database between launches:
 | `LinuxWebKit` | `WebContent`: WPE WebKit pages, loaded at run time, drawn into shared memory and shown by the player's `WebView` view ([plan](Documentation/Plan.md) §8) |
 | `LinuxCoreModel` | `LinuxModelStore`: the app's CoreModel stores in SQLite, through AppRuntime's `HostModelStore` and CoreModel-SQLite ([plan](Documentation/Plan.md) §9) |
 | `LinuxHostApp`, `linux-app-host` | The app's `main`: the host, and Cacao's window and loop. It also registers AppRuntime's `RuntimeFormatting`, dates and numbers over Swift Foundation ([plan](Documentation/Plan.md) §3) |
-| `LinuxPackager`, `linux-app` | The packager: validation, the host build, wasm2c, the install tree, PortMaster ports |
+| `LinuxPackager`, `linux-app` | The packager: validation, thinning a bundle to one target, the install tree, PortMaster ports |
 
 ## Building
 
@@ -106,28 +108,39 @@ python3 ~/Developer/AppRuntime/Scripts/guest.py bundle --product ExampleUI \
     --target linux-arm64 --output .build/guest
 ```
 
-Then, on Linux:
+Then, on Linux, build the runner once:
 
 ```sh
-swift build --product linux-app
-.build/debug/linux-app validate .build/guest/org.pureswift.ExampleUI.app
-.build/debug/linux-app package .build/guest/org.pureswift.ExampleUI.app --archive
-.build/debug/linux-app install .build/guest/org.pureswift.ExampleUI.app
-.build/debug/linux-app run .build/guest/org.pureswift.ExampleUI.app
+swift build --product linux-app-host --product linux-app
+.build/debug/linux-app-host .build/guest/org.pureswift.ExampleUI.app
 ```
 
-`package` writes an install tree (`bin/`, `lib/<id>/`, a desktop entry and
-icon) and, with `--archive`, a tarball of it; `install` puts it in
-`~/.local`. `--engine wasm2c` builds from `App.wasm` instead of a slice,
-which needs WABT (`apt install wabt`). The packaged program takes:
+and install apps for it:
+
+```sh
+.build/debug/linux-app validate .build/guest/org.pureswift.ExampleUI.app
+.build/debug/linux-app install .build/guest/org.pureswift.ExampleUI.app --runner .build/debug/linux-app-host
+.build/debug/linux-app-host org.pureswift.ExampleUI
+```
+
+`install` copies the bundle, thinned to `Info.plist`, `resources/`, the
+icon, its signature and this machine's `libapp.so`, to
+`~/.local/lib/linux-app/<id>.app`, and writes a desktop entry that starts
+the runner with the app's identifier. `package` writes the same tree
+elsewhere for a distribution's package, and `--archive` a tarball of it;
+`run` checks a bundle and runs it as it is. The runner takes:
 
 | Argument | |
 |---|---|
-| `--open URL` | A URL for the app to open |
-| `--bundle App.app` | Another bundle's keys; `App.app` next to the program by default |
+| `App.app` or `--bundle App.app` | A bundle |
+| An identifier | An installed app, found in `~/.local`, the runner's prefix, `/usr/local` or `/usr` (`LINUXAPPRUNTIME_PREFIXES`) |
+| `--open URL`, or a URL after the app | A URL for the app to open |
 
-`Scripts/run-app.sh` links a bundle's slice into `linux-app-host` and runs it
-in Docker, headless, saving its first frame:
+It checks the app's ABI and contracts at every launch, and its `libapp.so`
+against the bundle's `CodeResources` before loading it.
+
+`Scripts/run-app.sh` runs a bundle in the runner in Docker, headless,
+saving its first frame:
 
 ```sh
 mkdir -p .build/shots
@@ -137,8 +150,10 @@ Scripts/run-app.sh .build/guest/org.pureswift.ExampleUI.app .build/shots/Example
 ## PortMaster
 
 `linux-app portmaster` makes a [PortMaster](https://portmaster.games) port
-for aarch64 and armhf handhelds: the host built for their older glibc, SDL3
-built for them, a launcher, gamepad controls and the catalogue's metadata
+for aarch64 and armhf handhelds: the runner built for their older glibc
+and named after the app, the bundle thinned to its `libapp.so` for each
+architecture, SDL3 built for them, a launcher, gamepad controls and the
+catalogue's metadata
 ([design](Documentation/PortMaster.md)). Ports don't build on Cacao yet:
 their images need Cairo built for old glibc, and Cacao needs the handheld
 options the earlier player had (§7 there). In Docker:
