@@ -38,11 +38,9 @@ struct Fixture {
             let directory = url.appendingPathComponent("lib/\(target.rawValue)")
             try files.createDirectory(at: directory, withIntermediateDirectories: true)
             let elfMachine = target == .arm64 ? machine : target.elfMachine
-            // What a runner loads, and the archive bundles still carry.
+            // What a runner loads: a Linux slice is only its libapp.so.
             try Data(Self.elf(machine: elfMachine, type: target == .arm64 ? elfType : 3, is64: target != .armv7))
                 .write(to: directory.appendingPathComponent("libapp.so"))
-            try Data(Self.archive([("/", [0, 0, 0, 0]), ("app.o/", Self.elf(machine: elfMachine, type: 1))]))
-                .write(to: directory.appendingPathComponent("libapp.a"))
         }
         if wasm {
             try files.createDirectory(at: url.appendingPathComponent("wasm32"), withIntermediateDirectories: true)
@@ -86,23 +84,6 @@ struct Fixture {
         header[18] = UInt8(machine & 0xFF)
         header[19] = UInt8(machine >> 8)
         return header
-    }
-
-    /// An `ar` archive of the members.
-    static func archive(_ members: [(name: String, data: [UInt8])]) -> [UInt8] {
-        var bytes = Array("!<arch>\n".utf8)
-        for member in members {
-            func field(_ value: String, _ width: Int) -> [UInt8] {
-                Array(value.padding(toLength: width, withPad: " ", startingAt: 0).utf8)
-            }
-            bytes += field(member.name, 16) + field("0", 12) + field("0", 6) + field("0", 6) + field("644", 8)
-                + field(String(member.data.count), 10) + [0x60, 0x0A]
-            bytes += member.data
-            if member.data.count % 2 == 1 {
-                bytes.append(0x0A)
-            }
-        }
-        return bytes
     }
 }
 
