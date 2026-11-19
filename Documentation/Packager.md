@@ -78,7 +78,7 @@ share/applications/<identifier>.desktop
 share/icons/hicolor/256x256/apps/<identifier>.png  from the bundle's icon.png
 ```
 
-Thinning drops the other targets' libraries, `libapp.a` and `App.wasm`.
+Thinning drops the other targets' libraries and `App.wasm`.
 The signature is kept as it was: every file still in the bundle matches it,
 and the runner checks the library against it. The new copy is written
 beside the old one and replaces it whole.
