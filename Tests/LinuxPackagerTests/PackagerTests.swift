@@ -5,9 +5,8 @@ import Testing
 
 @Suite struct ValidatorTests {
 
-    func diagnostics(_ fixture: Fixture, target: LinuxTarget = .arm64, engine: Engine = .slice,
-                     allowMissing: Bool = false) throws -> [Diagnostic] {
-        var validator = Validator(bundle: try fixture.bundle, target: target, engine: engine)
+    func diagnostics(_ fixture: Fixture, target: LinuxTarget = .arm64, allowMissing: Bool = false) throws -> [Diagnostic] {
+        var validator = Validator(bundle: try fixture.bundle, target: target)
         validator.allowMissingContracts = allowMissing
         return validator.validate()
     }
@@ -26,7 +25,7 @@ import Testing
 
     @Test func aGoodBundlePasses() throws {
         #expect(try diagnostics(Fixture()).isEmpty)
-        #expect(try diagnostics(Fixture(), engine: .wasm2c).isEmpty)
+        #expect(try diagnostics(Fixture(), target: .x86_64).isEmpty)
     }
 
     @Test func contractsThisHostLacks() throws {
@@ -75,29 +74,26 @@ import Testing
             "resources/extra.txt was added",
         ])
         #expect(try diagnostics(fixture).filter { $0.severity == .error }.count == 3)
-        #expect(try Fixture(signed: false).bundle.codeResourceProblems().isEmpty, "unsigned bundles aren't checked")
+        // The runner checks the library against the signature, so there
+        // must be one.
+        #expect(try diagnostics(Fixture(signed: false)).map(\.message)
+                == ["the bundle isn't signed: it has no _CodeSignature/CodeResources, which the runner checks its library against"])
     }
 
     @Test func slicesMustBeForTheTarget() throws {
         let wrong = try diagnostics(Fixture(machine: LinuxTarget.x86_64.elfMachine))
-        #expect(wrong.map(\.message) == ["linux-arm64 slice: objects are for ELF machine [62], not 183 (aarch64)"])
-        let missing = try Fixture(targets: [])
-        #expect(try diagnostics(missing).map(\.message) == ["the bundle has no linux-arm64 slice; use --engine wasm2c"])
-        #expect(Engine.preferred(for: try missing.bundle, target: .arm64) == .wasm2c)
-        #expect(try diagnostics(Fixture(targets: [], wasm: false), engine: .wasm2c).map(\.message) == ["the bundle has no wasm32/App.wasm"])
+        #expect(wrong.map(\.message) == ["linux-arm64 slice: it's for ELF machine 62, not 183 (aarch64)"])
+        let object = try diagnostics(Fixture(elfType: 1))
+        #expect(object.map(\.message) == ["linux-arm64 slice: it isn't a shared library (ELF type 1)"])
+        let bits = try diagnostics(Fixture(), target: .armv7)
+        #expect(bits.map(\.message) == ["the bundle has no linux-armv7 slice (lib/linux-armv7/libapp.so)"])
+        #expect(try diagnostics(Fixture(targets: [.armv7]), target: .armv7).isEmpty)
+        #expect(try diagnostics(Fixture(targets: [])).map(\.message) == ["the bundle has no linux-arm64 slice (lib/linux-arm64/libapp.so)"])
     }
 
     @Test func capabilitiesWithoutSupportWarn() throws {
         let messages = try diagnostics(Fixture(capabilities: ["bluetooth", "location"]))
         #expect(messages == [.warning("the app declares location, which the Linux host doesn't support yet")])
-    }
-
-    @Test func archivesAreParsed() throws {
-        let archive = Fixture.archive([("/", [0, 0, 0, 0]), ("a.o/", Fixture.elf(machine: 62) + [1]), ("b.o/", Fixture.elf(machine: 183))])
-        #expect(try SliceInspector.elfMachines(archive) == [62, 183], "odd members are padded")
-        #expect(throws: PackagerError.self) {
-            try SliceInspector.elfMachines(Array("not an archive".utf8))
-        }
     }
 
     @Test func theHostAndThePackagerAgreeOnModules() {
@@ -115,66 +111,84 @@ import Testing
 
 @Suite struct PackagerTests {
 
-    func packager(_ fixture: Fixture, runner: FakeRunner) throws -> Packager {
-        var options = Packager.Options(target: .arm64, engine: .slice, hostPackage: URL(fileURLWithPath: "/src"),
-                                       workRoot: FileManager.default.temporaryDirectory.appendingPathComponent("work-\(UUID().uuidString)"))
-        options.configuration = "debug"
+    func packager(_ fixture: Fixture, runner: FakeRunner = FakeRunner(), output: URL? = nil) throws -> Packager {
+        var options = Packager.Options(target: .arm64)
+        options.output = output ?? FileManager.default.temporaryDirectory.appendingPathComponent("tree-\(UUID().uuidString)")
         return Packager(bundle: try fixture.bundle, options: options, runner: runner)
     }
 
-    @Test func writesTheInstallTree() throws {
+    @Test func thinsTheBundleAndBuildsNothing() throws {
         let fixture = try Fixture()
         let runner = FakeRunner()
         let result = try packager(fixture, runner: runner).package()
         let root = result.root
         let files = FileManager.default
 
-        #expect(try files.destinationOfSymbolicLink(atPath: root.appendingPathComponent("bin/Demo").path) == "../lib/org.example.Demo/Demo")
-        let program = root.appendingPathComponent("lib/org.example.Demo/Demo").path
-        #expect((try files.attributesOfItem(atPath: program)[.posixPermissions] as? Int) == 0o755)
-        let app = root.appendingPathComponent("lib/org.example.Demo/App.app")
-        #expect(try files.contentsOfDirectory(atPath: app.path).sorted() == ["Info.plist", "icon.png", "resources"])
+        let app = root.appendingPathComponent("lib/linux-app/org.example.Demo.app")
+        #expect(result.bundle.path == app.path)
+        #expect(try files.contentsOfDirectory(atPath: app.path).sorted()
+                == ["Info.plist", "_CodeSignature", "icon.png", "lib", "resources"])
+        #expect(try files.contentsOfDirectory(atPath: app.appendingPathComponent("lib").path) == ["linux-arm64"])
+        #expect(try files.contentsOfDirectory(atPath: app.appendingPathComponent("lib/linux-arm64").path) == ["libapp.so"])
         #expect(files.fileExists(atPath: root.appendingPathComponent("share/icons/hicolor/256x256/apps/org.example.Demo.png").path))
+        #expect(!files.fileExists(atPath: root.appendingPathComponent("bin").path), "no program of its own")
         let entry = try String(contentsOf: root.appendingPathComponent("share/applications/org.example.Demo.desktop"), encoding: .utf8)
-        #expect(entry.contains("Exec=Demo %u\n"))
+        #expect(entry.contains("Exec=linux-app-host org.example.Demo %u\n"))
         #expect(entry.contains("Name=Demo App\n"))
+        #expect(runner.commands.isEmpty, "nothing compiled or linked")
 
-        // The build: a generated package for the app's library.
-        let build = try #require(runner.commands.first)
-        #expect(build.starts(with: ["swift", "build", "--package-path"]))
-        #expect(build.contains("--static-swift-stdlib"), "Swift is linked in")
-        #expect(build[build.firstIndex(of: "--product")! + 1] == HostPackage.product)
-        let manifest = try String(contentsOf: URL(fileURLWithPath: build[3]).appendingPathComponent("Package.swift"), encoding: .utf8)
-        #expect(manifest.contains(#".package(name: "LinuxAppRuntime", path: "/src")"#))
-        #expect(manifest.contains("/lib/libapp-"), "a copy named for its contents, so a new library relinks")
+        // The thinned bundle still matches its signature, for what it kept.
+        let thinned = try UniversalBundle(url: app)
+        #expect(thinned.codeResourceProblems().allSatisfy { $0.hasSuffix("is missing") })
+        let digest = try AppLibrary.signedDigest(bundle: app.path, file: "lib/linux-arm64/libapp.so")
+        #expect(digest.count == 32)
 
-        // Packaging again replaces the tree.
-        _ = try packager(fixture, runner: runner).package()
+        // Packaging again replaces it.
+        _ = try packager(fixture, output: root).package()
+        #expect(!files.fileExists(atPath: app.deletingLastPathComponent().appendingPathComponent(".org.example.Demo.app.new").path))
     }
 
-    @Test func installsWithAnAbsolutePath() throws {
+    @Test func installsForTheRunner() throws {
         let fixture = try Fixture()
         let prefix = FileManager.default.temporaryDirectory.appendingPathComponent("prefix with space-\(UUID().uuidString)")
-        let result = try packager(fixture, runner: FakeRunner()).install(prefix: prefix)
-        #expect(result.executable.path == prefix.appendingPathComponent("bin/Demo").path)
+        let runner = URL(fileURLWithPath: "/opt/linux app/bin/linux-app-host")
+        let result = try packager(fixture).install(prefix: prefix, runner: runner)
+        #expect(result.bundle.path == InstalledApps.bundle(identifier: "org.example.Demo", prefix: prefix.path))
         let entry = try String(contentsOf: prefix.appendingPathComponent("share/applications/org.example.Demo.desktop"), encoding: .utf8)
-        #expect(entry.contains("Exec=\"\(prefix.path)/bin/Demo\" %u"))
+        #expect(entry.contains("Exec=\"/opt/linux app/bin/linux-app-host\" org.example.Demo %u"))
+        // The runner finds it by its identifier.
+        #expect(InstalledApps.find(identifier: "org.example.Demo", prefixes: ["/nonexistent", prefix.path]) == result.bundle.path)
+        #expect(InstalledApps.find(identifier: "org.example.Other", prefixes: [prefix.path]) == nil)
+        #expect(InstalledApps.find(identifier: "../etc", prefixes: [prefix.path]) == nil)
     }
 
     @Test func refusesInvalidBundles() throws {
         let fixture = try Fixture(contracts: [("org.example.Missing", 1, "contract")])
-        let runner = FakeRunner()
+        let output = FileManager.default.temporaryDirectory.appendingPathComponent("refused-\(UUID().uuidString)")
         #expect(throws: PackagerError.self) {
-            try packager(fixture, runner: runner).package()
+            try packager(fixture, output: output).package()
         }
-        #expect(runner.commands.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: output.path))
     }
 
     @Test func archives() throws {
-        var packager = try packager(Fixture(), runner: FakeRunner())
+        var packager = try packager(Fixture())
         packager.options.archive = true
         let result = try packager.package()
         #expect(result.archive?.lastPathComponent == "org.example.Demo-1.2-linux-arm64.tar.gz")
+    }
+
+    @Test func findsTheRunner() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("runner-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let program = directory.appendingPathComponent("linux-app-host")
+        try Data("#!/bin/sh\n".utf8).write(to: program)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: program.path)
+        #expect(try Runner.locate(nil, environment: ["PATH": "/nonexistent:\(directory.path)"], tool: nil) == program)
+        #expect(try Runner.locate(nil, environment: [:], tool: directory.appendingPathComponent("linux-app").path) == program)
+        #expect(throws: PackagerError.self) {
+            try Runner.locate(nil, environment: ["PATH": "/nonexistent"], tool: nil)
+        }
     }
 
     @Test func desktopEntriesNameTheAppInEachLanguage() throws {
@@ -194,6 +208,8 @@ import Testing
         var entry = DesktopEntry(identifier: "a.b", name: "Demo", exec: "demo", version: "1")
         entry.localizedNames = bundle.localizedDisplayNames
         #expect(entry.text.contains("Name=Demo\nName[pt_BR]=Demonstração\nName[zh_CN]=演示\nExec=demo %u\n"))
+        let runner = DesktopEntry(identifier: "a.b", name: "Demo", exec: "/usr/bin/linux-app-host", arguments: ["a.b"], version: "1")
+        #expect(runner.text.contains("Exec=/usr/bin/linux-app-host a.b %u\n"))
     }
 
     @Test func desktopEntriesEscape() {
@@ -201,10 +217,6 @@ import Testing
         #expect(DesktopEntry.quote("/opt/My App/bin/x") == "\"/opt/My App/bin/x\"")
         #expect(DesktopEntry.quote("/usr/bin/100%") == "/usr/bin/100%%")
         #expect(DesktopEntry.quote("/a/$HOME") == "\"/a/\\\\$HOME\"", "escaped inside quotes, then as a string")
-    }
-
-    @Test func swiftLiterals() {
-        #expect(literal("a\"b\\c\n") == #""a\"b\\c\n""#)
     }
 
     @Test func targets() {
