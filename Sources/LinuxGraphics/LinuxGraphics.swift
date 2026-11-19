@@ -23,6 +23,10 @@ public enum LinuxGraphics: HostModule {
         [.graphics: isAvailable ? GrantedPermission() : UnavailablePermission()]
     }
 
+    /// GLES 2.0's library, by soname: an app that draws binds its `gl*`
+    /// calls to it.
+    public static let gles = "libGLESv2.so.2"
+
     /// Whether `libEGL` and `libGLESv2` load.
     public static var isAvailable: Bool {
         GLLibrary.shared != nil
