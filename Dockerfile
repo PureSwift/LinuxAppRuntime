@@ -2,8 +2,7 @@
 # Debian 13, SDL3, Cairo, FreeType, fontconfig and Wayland for Cacao, a font,
 # Mesa's EGL and GLES 2.0 for GL surfaces (llvmpipe without a GPU), WPE WebKit
 # and its FreeDesktop.org backend for web views, which the host loads at run
-# time, Python for AppRuntime's scripts, and WABT for the packager's wasm2c
-# engine.
+# time, Python for AppRuntime's scripts, and WABT for its wasm2c shim.
 #
 # Debian rather than Ubuntu: Ubuntu 26.04 doesn't package WPE WebKit. SDL is
 # built from source: Debian's is 3.2, and PureSwift/SDL needs 3.4.
