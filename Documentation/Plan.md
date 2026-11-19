@@ -10,6 +10,11 @@ design, [Packager.md](Packager.md), and so do PortMaster ports,
 - **PortMaster ports** don't build on Cacao yet: they need Cairo built for
   their glibc, and Cacao options for fullscreen, scale and a drawn pointer
   ([PortMaster.md](PortMaster.md) §7).
+- **One runner for every app.** `linux-app-host` loads an app's
+  `libapp.so` (AppRuntime's §7.5, §7.6) instead of being built per app
+  with its `libapp.a` linked in, so installing an app copies files and
+  needs no toolchain, and the runner and the OS update on their own while
+  the app's ABI stays put (§4).
 - **Bluetooth** is tested against a fake bus that plays BlueZ's objects and
   signals; it hasn't run against `bluetoothd` and a device.
 - **AppRuntime's `guest.py bundle`** needed one fix to run on Linux: it
@@ -19,12 +24,13 @@ design, [Packager.md](Packager.md), and so do PortMaster ports,
 
 The Linux host for [AppRuntime](https://github.com/PureSwift/AppRuntime)
 apps, the counterpart of DarwinAppRuntime. An AppRuntime app is guest code
-only: a universal bundle with `App.wasm` and native `libapp.a` slices
-(`linux-arm64`, `linux-x86_64`, `linux-armv7`). This repository turns one
-into a Linux program:
+only: a universal bundle with `App.wasm` and a native slice for each Linux
+target (`linux-arm64`, `linux-x86_64`, `linux-armv7`), a `libapp.so`. This
+repository runs one on Linux:
 
-- the **host runtime**: `main`, the event loop, the runtime core behind
-  `rt.h`, and the contract implementations over Linux services;
+- the **runner**, `linux-app-host`: `main`, the event loop, the runtime core
+  behind `rt.h`, and the contract implementations over Linux services, into
+  which it loads an app's `libapp.so`;
 - the **SwiftUI player**: DarwinAppRuntime's renderer of the SwiftUI
   frontend's render IR, on Cacao's SwiftUI for Linux;
 - **Bluetooth** over BlueZ's D-Bus API;
@@ -44,14 +50,14 @@ AppRuntime's contracts.
 | In | Later |
 |---|---|
 | arm64 and x86_64 Linux with glibc (Debian 13, Ubuntu 24.04+) | armv7, musl |
-| Native slices linked into the host | wasm2c (AppRuntime's shim, as on Darwin); WasmKit for development |
+| Native slices, loaded by the runner | `App.wasm`, in an engine in the runner; wasm2c for a target a bundle lacks, before it's installed |
 | Wayland and X11 through SDL3; a headless driver for tests | Multiple windows |
 | `Renderer`, `BluetoothCentral` and friends, GL surfaces, web views, files, settings, model stores, date and number formatting, the built-ins | Location (GeoClue), Device (UPower, sysfs), Networking (libcurl), Motion (iio-sensor-proxy), NFC (neard) |
 
 ## 2. Process model
 
 ```
-┌────────────────────── app (one executable) ──────────────────────┐
+┌──────────────────── linux-app-host (the runner) ─────────────────┐
 │ LinuxHostApp main                                                │
 │   ├── runtime core: RuntimeCore + RuntimeNative (rt_* symbols)   │
 │   ├── MainLoop: timers, jobs from other threads                  │
@@ -60,7 +66,7 @@ AppRuntime's contracts.
 │   ├── LinuxWebKit: WPE WebKit pages, frames in shared memory     │
 │   ├── LinuxUI: DarwinUI, render IR → SwiftUI views → events      │
 │   │     └── Cacao: SwiftUI, Silica/Cairo, SDL3 windows and input │
-│   └── libapp.a: the app's sealed linux-arm64 / linux-x86_64 slice│
+│   └── libapp.so: the app's slice, loaded from its bundle         │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -112,21 +118,55 @@ every host written in Swift; this host registers them as they are:
 
 ## 4. Startup
 
-1. Read the app's keys (`RTABIVersion`, `RTContracts`, `RTCapabilities`,
-   `CFBundleIdentifier`, version and build) from the universal bundle's
-   `Info.plist`: the path from `--bundle`, or `App.app` next to the
-   executable.
-2. Check the ABI and contract versions (§7.6); refuse a newer ABI or a
-   contract this host lacks.
-3. `NativeRuntime.shared.bindDirectly()`; set capabilities; set the clock.
-4. Register the built-ins (`Permissions`, `Bundle`, `Application`) and each
-   module the app uses (`LinuxUI` for `Renderer`, `LinuxBluetooth`,
-   `LinuxGraphics`, `LinuxWebKit`).
-5. Call `rt_main`. When the guest calls `Renderer.make`, the player adds
+`linux-app-host` is the one program every app runs in. No app is linked
+into it: it loads the app's `libapp.so`, which names no other library and
+leaves undefined only `rt.h`, a few libc functions and, for an app that
+draws, GLES 2.0 (AppRuntime's §7.5).
+
+```
+linux-app-host [--bundle] App.app | IDENTIFIER [[--open] URL]
+```
+
+1. Find the app: a bundle's path, or an installed app's identifier, looked
+   up as `<prefix>/lib/linux-app/<identifier>.app` in `~/.local`, the
+   runner's own prefix, `/usr/local` and `/usr` (`LINUXAPPRUNTIME_PREFIXES`
+   replaces the list). Without one, `LINUXAPPRUNTIME_BUNDLE`, or `App.app`
+   next to the executable, as a PortMaster port has it.
+2. Name the process after the app (`PR_SET_NAME`, `CFBundleExecutable`),
+   so `ps` and `top` show it and not the runner.
+3. Read the app's keys from its `Info.plist` and check the ABI and contract
+   versions (§7.6), at every launch: the runner may have changed since the
+   app was installed. A newer ABI or a contract this host lacks refuses it.
+4. `NativeRuntime.shared.bindDirectly()`; set capabilities; set the clock.
+   Register the built-ins (`Permissions`, `Bundle`, `Application`) and each
+   module the app uses.
+5. Load the library (`AppLibrary`):
+   - check `lib/<target>/libapp.so` against the bundle's
+     `_CodeSignature/CodeResources`, and load the bytes checked: the file is
+     opened once, hashed, and loaded through its descriptor
+     (`/proc/self/fd`);
+   - for an app whose contracts include `Surface`, load
+     `libGLESv2.so.2` into the global scope first;
+   - `dlopen` it. It binds every symbol as it loads, so one the runner
+     lacks refuses the app, by name;
+   - look up `rt_main`, `rt_dispatch` and `rt_finalize`.
+6. Call `rt_main`. When the guest calls `Renderer.make`, the player adds
    its scene; the first tree is there before `rt_main` returns.
-6. Run Cacao's loop until the window closes, the window showing the first
+7. Run Cacao's loop until the window closes, the window showing the first
    scene (or, for an app with no renderer, the `MainLoop` until it's
    interrupted).
+
+What the runner's process supplies to the library:
+
+- **`rt.h`.** RuntimeNative defines its functions in Swift (`@c`).
+  `linux-app-host` is linked with a dynamic list
+  (`Sources/LinuxAppHost/exports.list`) that exports `rt_*`, which keeps
+  them though nothing in the runner calls them.
+- **libc's part.** The library binds to the C library the runner runs on,
+  glibc or musl. Where it lacks `arc4random_buf` (musl, glibc before 2.36),
+  `CLinuxHost` defines it and the runner exports it; its executable is
+  searched first, so that's the definition the app binds to.
+- **GLES 2.0**, loaded as above.
 
 ## 5. The SwiftUI player
 
@@ -367,6 +407,11 @@ SQLite one, CoreModel-SQLite, with SQLite compiled in, so a device needs no
   contract end to end in a container, answering on the main loop.
 - `LinuxHost`'s settings: the file's path from the environment, and
   settings read again at the next launch.
+- `LinuxHost`'s loader: libraries compiled by the test with the
+  toolchain's clang, in signed bundles: loaded, and their exports called;
+  refused unsigned, changed after signing, or not listed; a symbol the
+  process lacks named in the refusal; a library to preload that isn't
+  there. Where installed apps are found.
 - `LinuxCoreModel`: where stores are; about 500 requests answered as
   CoreModel's in-memory store answers them; every value there and back;
   batches applied whole or not at all; a store kept between launches,
@@ -377,10 +422,13 @@ SQLite one, CoreModel-SQLite, with SQLite compiled in, so a device needs no
   resources, a refused connection, remote loads without `network`, frames
   and their pixels, a click, typing, and a resize. Every WebKit call is made
   on one thread, which WebKit takes for its main thread.
-- End to end: AppRuntime's `ExampleUI` built as a `linux-arm64` slice,
-  linked into `linux-app-host` and run headless with SDL's `offscreen`
-  driver, its first frame saved with `CACAO_SCREENSHOT`. `ExampleModel`
-  the same way, launched twice on one container, with to-dos written into
+- End to end: AppRuntime's `ExampleUI`, `ExampleGL` and `ExampleModel`
+  bundles, their `linux-arm64` `libapp.so` loaded by `linux-app-host` and
+  run headless with SDL's `offscreen` driver, each first frame saved with
+  `CACAO_SCREENSHOT`; `ExampleGL` with GLES loaded first. `ExampleModel`
+  installed with `linux-app install` and launched by its identifier,
+  shown by `ps` as `ExampleModel`, and refused once its library is
+  changed; and launched twice on one container, with to-dos written into
   its SQLite database between the launches: the second shows them.
 - Real BlueZ needs hardware: manual runs on a Raspberry Pi or a laptop with
   `bluetoothd`.
@@ -389,11 +437,10 @@ SQLite one, CoreModel-SQLite, with SQLite compiled in, so a device needs no
 
 1. **Host runtime and player**: `LinuxHost`, `LinuxUI`, `LinuxBluetooth`,
    `LinuxHostApp`; `ExampleUI` runs in Docker.
-2. **Packager**: `linux-app` builds the host for a target triple, links the
-   bundle's slice (or wasm2c output), and writes an installable directory:
-   the executable, `Info.plist`, resources, a `.desktop` file and icon;
-   later Flatpak and AppImage, whose manifests carry the capabilities
-   (`--system-talk-name=org.bluez` for `bluetooth`).
+2. **Packager**: `linux-app` checks an app and installs it: its bundle
+   thinned to the target's `libapp.so`, a `.desktop` file and icon, for
+   the runner; later Flatpak and AppImage, whose manifests carry the
+   capabilities (`--system-talk-name=org.bluez` for `bluetooth`).
 3. **More contracts**: Location (GeoClue2), Device (UPower, sysfs),
    Networking (libcurl or AsyncHTTPClient), Motion (iio-sensor-proxy),
    NFC (neard). Formatting is done: AppRuntime's `RuntimeFormatting`
