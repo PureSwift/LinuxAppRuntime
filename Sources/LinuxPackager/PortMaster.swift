@@ -1,11 +1,23 @@
 import Foundation
 
 /// `linux-app portmaster`: a PortMaster port of an app (`PortMaster.md`).
+///
+/// A handheld has no runner installed, so the port carries one, named
+/// after the app, beside the app's bundle thinned to its `libapp.so` for
+/// each architecture. The runner is the same for every app; it's built
+/// here because a port's runs on an older glibc than a distribution's.
 public struct PortMasterPort {
 
     public struct Options {
         /// Where the port's directory and zip go.
         public var output: URL
+        /// This package's source, which the runner is built from.
+        public var source: URL = URL(fileURLWithPath: ".")
+        /// The runner's build directory.
+        public var scratch: URL = URL(fileURLWithPath: ".build/linux-app/runner")
+        /// More `swift build` arguments: a Swift SDK's destination for
+        /// another architecture.
+        public var buildArguments: [String] = []
         /// The libraries the port bundles: SDL3, SDL3_ttf, and whatever the
         /// build environment says (`LINUXAPPRUNTIME_PORT_LIBS`).
         public var libraries: URL?
@@ -28,7 +40,7 @@ public struct PortMasterPort {
         public var diagnostics: [Diagnostic]
     }
 
-    /// Builds the host: a `Packager` for `linux-arm64` or `linux-armv7`.
+    /// Checks the app: a `Packager` for `linux-arm64` or `linux-armv7`.
     public var packager: Packager
 
     public var options: Options
@@ -74,15 +86,15 @@ public struct PortMasterPort {
         guard errors.isEmpty else {
             throw PackagerError(errors.map(\.description).joined(separator: "\n"))
         }
-        var packager = self.packager
-        packager.options.configuration = "release"
-        packager.options.staticSwift = true
-        let binary = try packager.buildHost(library: try packager.library())
+        let target = packager.options.target
+        let binary = try Runner.build(source: options.source,
+                                      scratch: options.scratch.appendingPathComponent(target.rawValue),
+                                      extraArguments: options.buildArguments, runner: packager.runner)
         let result = try assemble(binary: binary, architecture: architecture)
         return Result(directory: result.directory, zip: result.zip, minimumGLIBC: result.glibc, diagnostics: diagnostics)
     }
 
-    /// Writes the port around a built host, adding to a port that has the
+    /// Writes the port around a built runner, adding to a port that has the
     /// other architecture.
     func assemble(binary: URL, architecture: String) throws(PackagerError) -> (directory: URL, zip: URL, glibc: String?) {
         let files = FileManager.default
@@ -91,7 +103,8 @@ public struct PortMasterPort {
         do {
             try files.createDirectory(at: game, withIntermediateDirectories: true)
 
-            // The program and its libraries, for this architecture.
+            // The runner, named after the app so that's what the device
+            // shows running, and its libraries, for this architecture.
             let program = game.appendingPathComponent("\(bundle.executable).\(architecture)")
             try replace(program, with: binary)
             try files.setAttributes([.posixPermissions: 0o755], ofItemAtPath: program.path)
@@ -113,15 +126,27 @@ public struct PortMasterPort {
                 }
             }
 
-            // What both architectures share.
+            // The bundle, thinned: what both architectures share, and each
+            // one's libapp.so, keeping the other architecture's.
             let app = game.appendingPathComponent("App.app")
-            if files.fileExists(atPath: app.path) {
-                try files.removeItem(at: app)
-            }
             try files.createDirectory(at: app, withIntermediateDirectories: true)
-            for name in try files.contentsOfDirectory(atPath: bundle.url.path) where !["lib", "wasm32", "_CodeSignature"].contains(name) {
-                try files.copyItem(at: bundle.url.appendingPathComponent(name), to: app.appendingPathComponent(name))
+            for name in Packager.kept {
+                let destination = app.appendingPathComponent(name)
+                if files.fileExists(atPath: destination.path) {
+                    try files.removeItem(at: destination)
+                }
+                let source = bundle.url.appendingPathComponent(name)
+                if files.fileExists(atPath: source.path) {
+                    try files.copyItem(at: source, to: destination)
+                }
             }
+            let target = packager.options.target
+            guard let slice = bundle.slice(target) else {
+                throw PackagerError("the bundle has no \(target.rawValue) slice")
+            }
+            let library = app.appendingPathComponent(target.sharedLibrary)
+            try files.createDirectory(at: library.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try replace(library, with: slice)
             if let fonts = options.fonts, files.fileExists(atPath: fonts.path) {
                 let destination = game.appendingPathComponent("fonts")
                 if files.fileExists(atPath: destination.path) {
@@ -385,7 +410,7 @@ public struct PortMasterPort {
             try files.removeItem(at: directory)
         }
         try files.createDirectory(at: directory, withIntermediateDirectories: true)
-        let host = packager.options.hostPackage.appendingPathComponent("LICENSE")
+        let host = options.source.appendingPathComponent("LICENSE")
         if files.fileExists(atPath: host.path) {
             try files.copyItem(at: host, to: directory.appendingPathComponent("LinuxAppRuntime.txt"))
         }
