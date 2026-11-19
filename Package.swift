@@ -4,18 +4,15 @@ import PackageDescription
 
 /// The Linux host for AppRuntime apps (`Documentation/Plan.md`).
 ///
-/// AppRuntime comes without its `GuestExports` trait: the app's library, a
-/// sealed slice, defines `rt_dispatch` and `rt_finalize`, and the host's own
+/// `linux-app-host` is the runner: it loads an app's `libapp.so`, which
+/// defines `rt_main`, `rt_dispatch` and `rt_finalize`, and links no app.
+/// AppRuntime comes without its `GuestExports` trait, so the host's own
 /// `DynamicRuntime` binds to the runtime directly.
 ///
 /// The environment:
 ///
 /// - `APPRUNTIME_PATH`: a local AppRuntime checkout instead of GitHub;
 ///   `CACAO_PATH` likewise for PureSwift/Cacao.
-/// - `LINUXAPPRUNTIME_APP_LIBRARY`: an app's `libapp.a` (a `linux-arm64` or
-///   `linux-x86_64` slice from `guest.py slice`), which `linux-app-host`
-///   links, with `libGLESv2` if the app calls GL. Without it,
-///   `linux-app-host` builds without an app and says so when run.
 let environment = ProcessInfo.processInfo.environment
 
 let appRuntime: Package.Dependency = {
@@ -45,10 +42,6 @@ let swiftUI: [Target.Dependency] = [
 #else
 let swiftUI: [Target.Dependency] = []
 #endif
-
-let appLibrary = environment["LINUXAPPRUNTIME_APP_LIBRARY"].flatMap { path in
-    FileManager.default.fileExists(atPath: path) ? path : nil
-}
 
 func runtime(_ product: String) -> Target.Dependency {
     .product(name: product, package: "AppRuntime")
@@ -101,7 +94,7 @@ let package = Package(
         .target(
             name: "LinuxHost",
             dependencies: [runtime("CRuntime"), runtime("RuntimeCore"), runtime("RuntimeNative"), runtime("DynamicRuntime"), runtime("RuntimeABI"),
-                           runtime("RuntimeHost"), runtime("DynamicFiles")],
+                           runtime("RuntimeHost"), runtime("DynamicFiles"), .product(name: "Crypto", package: "swift-crypto")],
             swiftSettings: host
         ),
 
@@ -163,23 +156,26 @@ let package = Package(
 
         // MARK: - App
 
-        // libc functions app slices need that older glibc lacks.
+        // What the runner's process supplies that libc may not
+        // (arc4random_buf), and prctl, which Swift can't call.
         .target(name: "CLinuxHost"),
         .target(
             name: "LinuxHostApp",
             dependencies: ["LinuxHost", "LinuxUI", "LinuxBluetooth", "LinuxGraphics", "LinuxWebKit", "LinuxCoreModel", "CLinuxHost", runtime("CRuntime"), runtime("RuntimeFormatting"),
-                           .product(name: "CacaoSDL", package: "Cacao")],
+                           runtime("DynamicGraphics"), .product(name: "CacaoSDL", package: "Cacao")],
             swiftSettings: host
         ),
         .executableTarget(
             name: "LinuxAppHost",
             dependencies: ["LinuxHostApp"],
-            swiftSettings: host + (appLibrary != nil ? [.define("APP_LINKED")] : []),
-            // The app's own `gl*` calls are libGLESv2's; it's needed only if
-            // it makes them.
-            linkerSettings: appLibrary.map {
-                [.unsafeFlags([$0, "-Xlinker", "--push-state", "-Xlinker", "--as-needed", "-lGLESv2", "-Xlinker", "--pop-state"])]
-            } ?? []
+            exclude: ["exports.list"],
+            swiftSettings: host,
+            // The runner exports rt.h's functions for the app's libapp.so,
+            // and the linker keeps them though nothing here calls them.
+            linkerSettings: [
+                .unsafeFlags(["-Xlinker", "--dynamic-list=\(Context.packageDirectory)/Sources/LinuxAppHost/exports.list"],
+                             .when(platforms: [.linux])),
+            ]
         ),
 
         // MARK: - Packager
@@ -199,7 +195,8 @@ let package = Package(
 
         // MARK: - Tests
 
-        .testTarget(name: "LinuxHostTests", dependencies: ["LinuxHost", runtime("DynamicFiles")], swiftSettings: host),
+        .testTarget(name: "LinuxHostTests", dependencies: ["LinuxHost", runtime("DynamicFiles"), .product(name: "Crypto", package: "swift-crypto")],
+                    swiftSettings: host),
         .testTarget(
             name: "LinuxUITests",
             dependencies: ["LinuxUI", runtime("DynamicUI"), runtime("DynamicRuntime"), .product(name: "Cacao", package: "Cacao")] + swiftUI,
