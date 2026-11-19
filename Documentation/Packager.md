@@ -1,26 +1,31 @@
 # Packager — Design
 
-**Status:** implemented, except Flatpak, AppImage and cross-building (§5).
-`ExampleUI` packages from its bundle with either engine, and the packaged
-app runs.
+**Status:** implemented, except Flatpak and AppImage (§5). `ExampleUI`,
+`ExampleGL` and `ExampleModel` install from their bundles and run in the
+runner.
 
-`linux-app` turns a universal bundle into a Linux app: phase 2 of the
-[plan](Plan.md). It never compiles guest Swift. The bundle already has the
-guest's code, as a sealed `libapp.a` per target and `App.wasm`, and its
-`Info.plist` has the portable keys AppRuntime's manifest stage wrote
-(DarwinAppRuntime's `ManifestPackager.md` §1).
+`linux-app` installs a universal bundle's app for the runner,
+`linux-app-host` ([Plan.md](Plan.md) §4): phase 2 of the plan. It never
+compiles or links anything. The bundle has the guest's code, as a
+`libapp.so` per Linux target, which `guest.py` linked when it built the
+bundle (AppRuntime's `DynamicRuntime.md` §7.5), and its `Info.plist` has
+the portable keys AppRuntime's manifest stage wrote (DarwinAppRuntime's
+`ManifestPackager.md` §1). So a device needs the runner, and no compiler,
+linker or SwiftPM; the runner and the OS update on their own, and the app's
+ABI is what stays put.
 
 ```sh
 linux-app validate App.app [--target linux-arm64]
-linux-app package  App.app [--target …] [--engine slice|wasm2c] [--output DIR] [--archive]
-linux-app install  App.app [--prefix ~/.local]
-linux-app run      App.app [-- host arguments]
+linux-app package  App.app [--target …] [--output DIR] [--archive]
+linux-app install  App.app [--prefix ~/.local] [--runner PATH]
+linux-app run      App.app [--runner PATH] [-- URL]
 ```
 
 ## 1. Validation
 
 `validate`, and every other command first, checks the bundle against this
-host:
+host. The runner checks the ABI, the contracts and the library's signature
+again at every launch, since it may have changed since.
 
 | Check | Failure |
 |---|---|
@@ -28,80 +33,73 @@ host:
 | `RTABIVersion` ≤ the host's | error |
 | Each `RTContracts` entry is implemented here, as the same kind | error; `--allow-missing-contracts` makes it a warning, and the guest sees the contract as absent |
 | … at the same version or later | warning: methods added later resolve as absent |
-| `_CodeSignature/CodeResources` matches every file's SHA-256 | error: a corrupt or tampered bundle |
-| The engine's input: `lib/<target>/libapp.a` for `slice`, `wasm32/App.wasm` for `wasm2c` | error |
-| The slice is an archive of ELF objects for the target's machine | error |
+| The bundle has `_CodeSignature/CodeResources`, and it matches every file's SHA-256 | error: the runner loads no library its bundle doesn't vouch for |
+| `lib/<target>/libapp.so` is there, and is a shared library for the target's machine and word size | error |
 | A declared capability this host has no contract for (location, motion, NFC, …) | warning |
 
-## 2. Targets and engines
+`guest.py` has checked the rest of the library when it built it: that it
+names no other library, binds as it loads, exports the three guest exports
+only, and leaves undefined only what a runner supplies.
 
-The target is the build machine's (`linux-arm64` on aarch64, `linux-x86_64`
-on x86_64); cross-building waits on Swift SDKs for Linux targets.
+## 2. Targets
 
-- **`slice`** (the default when the bundle has one) links the bundle's
-  `lib/<target>/libapp.a`.
-- **`wasm2c`** (the default otherwise) runs AppRuntime's
-  `Scripts/wasm2c-shim.py build` on `App.wasm`, which needs WABT (`apt
-  install wabt`) and clang, and links its `libapp.a` the same way.
-  Ubuntu's `wabt` 1.0.36 leaves out two files its runtime source includes
-  (`wasm-rt-impl-tableops.inc`, `wasm-rt-mem-impl-helper.inc`); the
-  `Dockerfile` adds them from the same release. The
-  AppRuntime checkout comes from `--appruntime`, `APPRUNTIME_PATH`, or the
-  one SwiftPM resolved for the host build.
+The target is this machine's (`linux-arm64` on aarch64, `linux-x86_64` on
+x86_64, `linux-armv7` on armv7l), or `--target`'s. A bundle carries a
+`libapp.so` for each target it was built for.
 
-## 3. Building the host
+There's no wasm2c engine: it needs a C compiler, which a device doesn't
+have. A bundle without a slice for a target needs one made where there's
+a toolchain, by AppRuntime's wasm2c shim, before it's installed; the shim
+makes only a `libapp.a` so far. Running `App.wasm` itself is for an engine
+in the runner.
 
-As on Darwin, the host is built per app from a generated SwiftPM package in
-the work directory (`.build/linux-app/<identifier>/<target>`, reused
-between builds):
+## 3. The runner
 
-```
-Package.swift   an executable product, LinuxAppMain, depending on this
-                package's LinuxHostApp, linking the app's libapp.a; the
-                tree names its copy CFBundleExecutable
-Sources/<Executable>/main.swift
-                HostApp.main(AppEntryPoints(main: rt_main, …))
-```
+Apps don't get a program of their own: every app runs in `linux-app-host`,
+installed once (Plan.md §4). `install` and `run` find it from `--runner`,
+`LINUXAPPRUNTIME_RUNNER`, beside `linux-app`, or on `PATH`.
 
-`swift build -c release` (or `--configuration debug`) builds it. The app's library is copied in as `lib/libapp-<hash>.a`: SwiftPM
-doesn't relink when a library named in linker flags changes, but a new name
-changes the manifest. This
-package is found from `--host-package`, `LINUXAPPRUNTIME_PATH`, or the
-source tree `linux-app` was built from.
+A PortMaster port is the exception: a handheld has no runner installed, so
+the port carries one, built by `linux-app portmaster` for the handheld's
+glibc ([PortMaster.md](PortMaster.md)). It's the same program for every
+app.
 
 ## 4. The app
 
-`package` writes an install tree under `--output` (default
-`.build/linux-app/<identifier>/<target>/out`):
+`install` writes the app into `--prefix` (`~/.local` by default):
 
 ```
-bin/<executable>                                  → ../lib/<identifier>/<executable>
-lib/<identifier>/<executable>                     the host, linked with the app
-lib/<identifier>/App.app/Info.plist               the bundle, without lib/ and wasm32/
-lib/<identifier>/App.app/resources/…
+lib/linux-app/<identifier>.app/Info.plist          the bundle, thinned:
+lib/linux-app/<identifier>.app/resources/…
+lib/linux-app/<identifier>.app/icon.png
+lib/linux-app/<identifier>.app/_CodeSignature/CodeResources
+lib/linux-app/<identifier>.app/lib/<target>/libapp.so   this target's only
 share/applications/<identifier>.desktop
-share/icons/hicolor/256x256/apps/<identifier>.png from the bundle's icon.png
+share/icons/hicolor/256x256/apps/<identifier>.png  from the bundle's icon.png
 ```
 
-The host finds `App.app` next to its executable, through the `bin/`
-symlink. `--archive` also writes `<identifier>-<version>-<target>.tar.gz`
-of the tree.
+Thinning drops the other targets' libraries, `libapp.a` and `App.wasm`.
+The signature is kept as it was: every file still in the bundle matches it,
+and the runner checks the library against it. The new copy is written
+beside the old one and replaces it whole.
 
-The desktop entry names the app (`CFBundleName`), runs it (`Exec`, with
+The desktop entry names the app (`CFBundleName`), runs it
+(`Exec=<runner> <identifier> %u`, the runner by its absolute path, with
 `%u` so URLs reach `Application.open`), and matches its windows: the host
 sets SDL's app metadata, so the window's Wayland app ID and X11 class are
-the identifier, which `StartupWMClass` repeats.
+the identifier, which `StartupWMClass` repeats. `install` refreshes the
+desktop database when `update-desktop-database` is there.
 
-`install` packages and copies the tree into `--prefix` (`~/.local` by
-default), with `Exec` an absolute path, and refreshes the desktop database
-when `update-desktop-database` is there. `run` packages a debug build into
-the work directory and runs it.
+`package` writes the same tree to `--output` (default
+`.build/linux-app/<identifier>/<target>`) for a distribution's package,
+with the runner named by `Exec` from `PATH`, and `--archive` also writes
+`<identifier>-<version>-<target>.tar.gz` of it. `run` checks the bundle and
+runs it in the runner as it is.
 
 ## 5. Later
 
 - **Flatpak and AppImage.** A Flatpak manifest carries the capabilities as
   sandbox permissions (`bluetooth` → `--system-talk-name=org.bluez`,
   `network` → `--share=network`).
-- **Localized names** in the desktop entry, from the bundle's
-  `<language>.lproj` tables.
-- **Cross-building** for another architecture with a Swift SDK.
+- **A read-only image** per app (squashfs), as AppRuntime's launcher
+  mounts them (§7.8 there).
