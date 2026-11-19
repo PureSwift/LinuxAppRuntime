@@ -48,10 +48,12 @@ x86_64, `linux-armv7` on armv7l), or `--target`'s. A bundle carries a
 `libapp.so` for each target it was built for.
 
 There's no wasm2c engine: it needs a C compiler, which a device doesn't
-have. A bundle without a slice for a target needs one made where there's
-a toolchain, by AppRuntime's wasm2c shim, before it's installed; the shim
-makes only a `libapp.a` so far. Running `App.wasm` itself is for an engine
-in the runner.
+have. A bundle without a slice for a target gets one where there's a
+toolchain, before it's installed: AppRuntime's
+`Scripts/wasm2c-shim.py slice --bundle App.app --target linux-arm64` makes
+`lib/linux-arm64/libapp.so` from `wasm32/App.wasm` and re-signs the bundle,
+and the runner loads it like a native slice. Running `App.wasm` itself is
+for an engine in the runner.
 
 ## 3. The runner
 
