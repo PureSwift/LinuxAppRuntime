@@ -3,7 +3,7 @@ import Foundation
 import LinuxHost
 
 /// A universal bundle from AppRuntime's `guest.py bundle`: `Info.plist`,
-/// `lib/<target>/libapp.so` and `libapp.a`, `wasm32/App.wasm`,
+/// `lib/<target>/libapp.so` for each Linux target, `wasm32/App.wasm`,
 /// `_CodeSignature/CodeResources`, and optionally `resources/` and
 /// `icon.png` (`Packager.md` §1).
 public struct UniversalBundle {
