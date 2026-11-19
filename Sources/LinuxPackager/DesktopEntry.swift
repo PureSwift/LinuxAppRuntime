@@ -8,15 +8,20 @@ public struct DesktopEntry: Equatable {
     /// The program: a name on `PATH`, or an absolute path.
     public var exec: String
 
+    /// What the program is given before the URL to open: the runner, the
+    /// app's identifier.
+    public var arguments: [String]
+
     public var version: String
 
     /// `Name[locale]`, by POSIX locale (`pt_BR`).
     public var localizedNames: [String: String] = [:]
 
-    public init(identifier: String, name: String, exec: String, version: String) {
+    public init(identifier: String, name: String, exec: String, arguments: [String] = [], version: String) {
         self.identifier = identifier
         self.name = name
         self.exec = exec
+        self.arguments = arguments
         self.version = version
     }
 
@@ -28,7 +33,7 @@ public struct DesktopEntry: Equatable {
         ]
         lines += localizedNames.sorted { $0.key < $1.key }.map { "Name[\($0.key)]=\(Self.escape($0.value))" }
         lines += [
-            "Exec=\(Self.quote(exec)) %u",
+            "Exec=\(([exec] + arguments).map(Self.quote).joined(separator: " ")) %u",
             "Icon=\(Self.escape(identifier))",
             "Terminal=false",
             "Categories=Utility;",
