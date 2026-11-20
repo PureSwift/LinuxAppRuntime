@@ -1,0 +1,8 @@
+/* What linux-app-host exports for the app's libapp.so to bind to
+ * (Plan.md §4): rt.h's functions, which RuntimeNative defines, and
+ * arc4random_buf where CLinuxHost defines it. The linker keeps them,
+ * though nothing in the runner calls them. */
+{
+  rt_*;
+  arc4random_buf;
+};

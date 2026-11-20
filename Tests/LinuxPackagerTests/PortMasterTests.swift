@@ -4,9 +4,8 @@ import Testing
 
 @Suite struct PortMasterTests {
 
-    func port(_ fixture: Fixture, output: URL, libraries: URL? = nil) throws -> PortMasterPort {
-        var options = Packager.Options(target: .arm64, engine: .slice, hostPackage: URL(fileURLWithPath: "/src"))
-        options.workRoot = output.appendingPathComponent("work")
+    func port(_ fixture: Fixture, output: URL, libraries: URL? = nil, target: LinuxTarget = .arm64) throws -> PortMasterPort {
+        let options = Packager.Options(target: target)
         var portOptions = PortMasterPort.Options(output: output)
         portOptions.libraries = libraries
         portOptions.fonts = nil
@@ -38,17 +37,20 @@ import Testing
         let binary = try temporary("bin").appendingPathComponent("host")
         try Data("#!/bin/sh\n".utf8).write(to: binary)
 
-        let port = try port(Fixture(), output: output, libraries: libraries)
-        _ = try port.assemble(binary: binary, architecture: "aarch64")
-        let result = try port.assemble(binary: binary, architecture: "armhf")
+        let fixture = try Fixture(targets: [.arm64, .armv7])
+        _ = try port(fixture, output: output, libraries: libraries, target: .arm64).assemble(binary: binary, architecture: "aarch64")
+        let result = try port(fixture, output: output, libraries: libraries, target: .armv7).assemble(binary: binary, architecture: "armhf")
 
         let files = FileManager.default
         let game = result.directory.appendingPathComponent("demo")
         for path in ["Demo.aarch64", "Demo.armhf", "libs.aarch64/libSDL3.so.0", "libs.armhf/libSDL3.so.0",
-                     "App.app/Info.plist", "demo.gptk", "licenses/SDL3.txt"] {
+                     "App.app/Info.plist", "App.app/_CodeSignature/CodeResources", "demo.gptk", "licenses/SDL3.txt"] {
             #expect(files.fileExists(atPath: game.appendingPathComponent(path).path), "\(path)")
         }
-        #expect(!files.fileExists(atPath: game.appendingPathComponent("App.app/lib").path))
+        // Each architecture's library, and no archive or wasm.
+        #expect(try files.contentsOfDirectory(atPath: game.appendingPathComponent("App.app/lib").path).sorted() == ["linux-arm64", "linux-armv7"])
+        #expect(try files.contentsOfDirectory(atPath: game.appendingPathComponent("App.app/lib/linux-armv7").path) == ["libapp.so"])
+        #expect(!files.fileExists(atPath: game.appendingPathComponent("App.app/wasm32").path))
         #expect((try files.attributesOfItem(atPath: game.appendingPathComponent("Demo.armhf").path)[.posixPermissions] as? Int) == 0o755)
 
         let json = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: result.directory.appendingPathComponent("port.json"))) as? [String: Any])

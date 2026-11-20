@@ -7,8 +7,7 @@
 #   Scripts/docker.sh swift test --scratch-path .build/linux
 #   APPRUNTIME_PATH=~/Developer/AppRuntime Scripts/docker.sh swift build --scratch-path .build/linux
 #
-# LINUXAPPRUNTIME_APP_LIBRARY, a path inside the container, and
-# CACAO_SCREENSHOT_DELAY are passed through. WebKit's web processes run
+# CACAO_SCREENSHOT_DELAY is passed through. WebKit's web processes run
 # without their bubblewrap sandbox, which can't make namespaces in a
 # container.
 set -e
@@ -30,6 +29,6 @@ fi
 exec docker run --rm \
     -v "$root:/src" -w /src \
     -v linuxappruntime-swiftpm:/root/.cache \
-    -e LINUXAPPRUNTIME_APP_LIBRARY -e CACAO_SCREENSHOT_DELAY \
+    -e CACAO_SCREENSHOT_DELAY \
     -e WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 \
     "$@" "$image" bash -c "$command"

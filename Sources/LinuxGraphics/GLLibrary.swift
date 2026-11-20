@@ -7,9 +7,10 @@ import Darwin
 /// EGL, and the few GLES 2.0 functions the host calls itself, looked up at
 /// run time (`Plan.md` §7).
 ///
-/// The host links no GL: an app that draws has `libGLESv2` linked in by the
-/// packager, for its own `gl*` calls, and the host opens the same libraries
-/// by name. Without them, `Surface` is unavailable and the rest of the host
+/// The host links no GL. For an app that draws, the runner loads
+/// `libGLESv2` into the global scope before the app's library, which binds
+/// its own `gl*` calls to it, and the host opens the same libraries by
+/// name. Without them, `Surface` is unavailable and the rest of the host
 /// works as before.
 struct GLLibrary {
 
@@ -58,7 +59,7 @@ struct GLLibrary {
 
     private init?() {
         guard let egl = Self.open(["libEGL.so.1", "libEGL.so"]),
-              let gles = Self.open(["libGLESv2.so.2", "libGLESv2.so"]) else {
+              let gles = Self.open([LinuxGraphics.gles, "libGLESv2.so"]) else {
             return nil
         }
         func load<T>(_ library: UnsafeMutableRawPointer, _ name: String, as type: T.Type = T.self) -> T? {

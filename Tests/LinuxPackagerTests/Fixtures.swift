@@ -14,6 +14,7 @@ struct Fixture {
         contracts: [(name: String, version: Int, kind: String)] = [("org.pureswift.ui.Renderer", 1, "contract")],
         capabilities: [String] = [],
         machine: UInt16 = LinuxTarget.arm64.elfMachine,
+        elfType: UInt16 = 3,
         targets: [LinuxTarget] = [.arm64, .x86_64],
         wasm: Bool = true,
         signed: Bool = true
@@ -37,8 +38,9 @@ struct Fixture {
             let directory = url.appendingPathComponent("lib/\(target.rawValue)")
             try files.createDirectory(at: directory, withIntermediateDirectories: true)
             let elfMachine = target == .arm64 ? machine : target.elfMachine
-            try Data(Self.archive([("/", [0, 0, 0, 0]), ("app.o/", Self.elf(machine: elfMachine))]))
-                .write(to: directory.appendingPathComponent("libapp.a"))
+            // What a runner loads: a Linux slice is only its libapp.so.
+            try Data(Self.elf(machine: elfMachine, type: target == .arm64 ? elfType : 3, is64: target != .armv7))
+                .write(to: directory.appendingPathComponent("libapp.so"))
         }
         if wasm {
             try files.createDirectory(at: url.appendingPathComponent("wasm32"), withIntermediateDirectories: true)
@@ -70,32 +72,18 @@ struct Fixture {
         get throws { try UniversalBundle(url: url) }
     }
 
-    /// A minimal ELF header with `e_machine`.
-    static func elf(machine: UInt16) -> [UInt8] {
+    /// A minimal ELF header: `e_machine`, `e_type` (3 a shared library, 1
+    /// an object) and its class.
+    static func elf(machine: UInt16, type: UInt16 = 3, is64: Bool = true) -> [UInt8] {
         var header = [UInt8](repeating: 0, count: 64)
         header[0...3] = [0x7F, 0x45, 0x4C, 0x46]
-        header[4] = 2
+        header[4] = is64 ? 2 : 1
         header[5] = 1
+        header[16] = UInt8(type & 0xFF)
+        header[17] = UInt8(type >> 8)
         header[18] = UInt8(machine & 0xFF)
         header[19] = UInt8(machine >> 8)
         return header
-    }
-
-    /// An `ar` archive of the members.
-    static func archive(_ members: [(name: String, data: [UInt8])]) -> [UInt8] {
-        var bytes = Array("!<arch>\n".utf8)
-        for member in members {
-            func field(_ value: String, _ width: Int) -> [UInt8] {
-                Array(value.padding(toLength: width, withPad: " ", startingAt: 0).utf8)
-            }
-            bytes += field(member.name, 16) + field("0", 12) + field("0", 6) + field("0", 6) + field("644", 8)
-                + field(String(member.data.count), 10) + [0x60, 0x0A]
-            bytes += member.data
-            if member.data.count % 2 == 1 {
-                bytes.append(0x0A)
-            }
-        }
-        return bytes
     }
 }
 

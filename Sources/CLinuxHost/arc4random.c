@@ -1,10 +1,14 @@
-// What app slices need from libc that older glibc lacks. Ubuntu 22.04's
-// glibc 2.35, which PortMaster ports build against, has no arc4random_buf
-// (2.36 added it); Embedded Swift's hashing calls it for its seed.
+// arc4random_buf, which an app's libapp.so leaves undefined (Embedded
+// Swift's hashing calls it for its seed), where libc lacks it: musl, and
+// glibc before 2.36 (Ubuntu 22.04's 2.35, which PortMaster ports build
+// against). The runner exports it (exports.list), and its executable is
+// searched first, so this is the definition the app binds to rather than
+// one some other library in the process happens to have (on Alpine,
+// Mesa pulls in libbsd's).
 
 #include <features.h>
 
-#if defined(__GLIBC__) && !__GLIBC_PREREQ(2, 36)
+#if !defined(__GLIBC__) || !__GLIBC_PREREQ(2, 36)
 
 #include <errno.h>
 #include <stddef.h>

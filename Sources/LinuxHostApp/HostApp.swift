@@ -2,6 +2,7 @@
 @_exported import LinuxHost
 import CLinuxHost
 import CacaoSDL
+import DynamicGraphics
 import Foundation
 import LinuxBluetooth
 import LinuxCoreModel
@@ -10,18 +11,20 @@ import LinuxWebKit
 import LinuxUI
 import RuntimeFormatting
 
-/// The app's `main` (`Plan.md` §4): finds the app's bundle, checks and
-/// prepares the app, calls `rt_main`, and runs Cacao's main loop with a
-/// window showing the guest's renderer.
+/// The runner (`Plan.md` §4): finds an app's bundle, checks the app
+/// against this host, loads its `libapp.so`, calls `rt_main`, and runs
+/// Cacao's main loop with a window showing the guest's renderer. No app is
+/// linked in: every app runs in this one program.
 ///
 /// ```
-/// linux-app-host [--bundle App.app] [--open URL]
+/// linux-app-host [--bundle] App.app | IDENTIFIER [[--open] URL]
 /// ```
 ///
-/// - `--bundle`: the universal bundle whose `Info.plist` describes the app
-///   linked in; by default `App.app` next to the executable, or
-///   `LINUXAPPRUNTIME_BUNDLE`.
-/// - `--open`: a URL for the app to open once it started.
+/// - The app: a bundle's path, or an installed app's identifier
+///   (`InstalledApps`); by default `LINUXAPPRUNTIME_BUNDLE`, or `App.app`
+///   next to the executable, as a PortMaster port has it.
+/// - `--open`: a URL for the app to open once it started, as a desktop
+///   entry's `%u` passes it.
 ///
 /// Cacao's `CACAO_SCREENSHOT=path.png` saves the first frame and quits.
 public enum HostApp {
@@ -38,20 +41,35 @@ public enum HostApp {
     /// The window's title: the app's name.
     nonisolated(unsafe) static var title = ""
 
-    public static func main(_ entry: AppEntryPoints?) -> Never {
+    public static func main() -> Never {
         let arguments = Arguments(CommandLine.arguments)
-        guard let entry else {
-            fail("this host was built without an app; build it with LINUXAPPRUNTIME_APP_LIBRARY set to an app's libapp.a")
-        }
-        guard let bundle = arguments.bundle ?? defaultBundle() else {
-            fail("no app bundle: pass --bundle App.app")
+        let bundle: String
+        switch arguments.app {
+        case .bundle(let path)?:
+            bundle = path
+        case .identifier(let identifier)?:
+            guard let found = InstalledApps.find(identifier: identifier) else {
+                fail("\(identifier) isn't installed (searched \(InstalledApps.prefixes().map { $0 + "/" + InstalledApps.directory }.joined(separator: ", ")))")
+            }
+            bundle = found
+        case nil:
+            guard let found = defaultBundle() else {
+                fail("no app: pass a bundle's path or an installed app's identifier")
+            }
+            bundle = found
         }
         let info: AppInfo
+        let executable: String?
         do {
-            info = try AppInfo(contentsOf: bundle + "/Info.plist")
+            let data = try Data(contentsOf: URL(fileURLWithPath: bundle + "/Info.plist"))
+            info = try AppInfo(propertyList: data)
+            let dictionary = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+            executable = dictionary?["CFBundleExecutable"] as? String
         } catch {
             fail("\(bundle): \(error)")
         }
+        // Shown by `ps` and `top` as the app, not as the runner.
+        clinuxhost_set_process_name(executable ?? info.name)
 
         // Cacao's loop drains the main queue every turn; the host's own
         // loop runs its jobs and timers there.
@@ -60,13 +78,26 @@ public enum HostApp {
             MainLoop.shared.runsOnMainQueue = true
         }
 
+        // The app's ABI and contracts, checked at every launch: this
+        // runner may have changed since the app was installed.
         let host = AppHost(info: info, modules: modules, bundlePath: bundle)
         do {
             try host.prepare()
         } catch {
             fail(error.description)
         }
-        let status = host.start(entry)
+        guard let target = LinuxTarget.native else {
+            fail("this machine isn't one of the Linux targets: \(LinuxTarget.allCases.map(\.rawValue).joined(separator: ", "))")
+        }
+        let library: AppLibrary
+        do {
+            library = try AppLibrary.load(bundle: bundle, target: target, preload: preload(for: info))
+        } catch {
+            fail(error.description)
+        }
+        HostLog.debug("loaded \(library.path)")
+
+        let status = host.start(library.entryPoints)
         guard status == .ok else {
             fail("the app didn't start: \(status)")
         }
@@ -87,12 +118,19 @@ public enum HostApp {
         exit(0)
     }
 
+    /// The libraries an app's `libapp.so` binds to that the runner doesn't
+    /// link: GLES 2.0 for an app that draws (`Surface`), which the library
+    /// doesn't name itself.
+    static func preload(for info: AppInfo) -> [String] {
+        info.contractNames.contains(SurfaceProxy.descriptor.name) ? [LinuxGraphics.gles] : []
+    }
+
     static func fail(_ message: String) -> Never {
         HostLog.error(message)
         exit(1)
     }
 
-    /// `App.app` next to the executable, or `LINUXAPPRUNTIME_BUNDLE`.
+    /// `LINUXAPPRUNTIME_BUNDLE`, or `App.app` next to the executable.
     static func defaultBundle() -> String? {
         if let path = ProcessInfo.processInfo.environment["LINUXAPPRUNTIME_BUNDLE"] {
             return path
@@ -103,16 +141,30 @@ public enum HostApp {
     }
 
     struct Arguments {
-        var bundle: String?
+
+        enum App: Equatable {
+            case bundle(String)
+            case identifier(String)
+        }
+
+        var app: App?
         var open: String?
 
         init(_ arguments: [String]) {
             var iterator = arguments.dropFirst().makeIterator()
             while let argument = iterator.next() {
                 switch argument {
-                case "--bundle": bundle = iterator.next()
-                case "--open": open = iterator.next()
-                default: HostLog.warning("ignoring \(argument)")
+                case "--bundle":
+                    app = iterator.next().map(App.bundle)
+                case "--open":
+                    open = iterator.next()
+                case _ where app == nil && !argument.hasPrefix("-"):
+                    // A path names a bundle; otherwise it's an identifier.
+                    app = argument.contains("/") || argument.hasSuffix(".app") ? .bundle(argument) : .identifier(argument)
+                case _ where open == nil && !argument.hasPrefix("-"):
+                    open = argument
+                default:
+                    HostLog.warning("ignoring \(argument)")
                 }
             }
         }

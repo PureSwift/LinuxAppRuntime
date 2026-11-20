@@ -3,8 +3,9 @@ import Foundation
 import LinuxHost
 
 /// A universal bundle from AppRuntime's `guest.py bundle`: `Info.plist`,
-/// `lib/<target>/libapp.a`, `wasm32/App.wasm`, and optionally `resources/`,
-/// `icon.png` and `_CodeSignature/CodeResources` (`Packager.md` §1).
+/// `lib/<target>/libapp.so` for each Linux target, `wasm32/App.wasm`,
+/// `_CodeSignature/CodeResources`, and optionally `resources/` and
+/// `icon.png` (`Packager.md` §1).
 public struct UniversalBundle {
 
     public let url: URL
@@ -53,9 +54,10 @@ public struct UniversalBundle {
             ?? executable
     }
 
-    /// The target's sealed slice, if the bundle has one.
+    /// The target's slice, the `libapp.so` the runner loads, if the bundle
+    /// has one.
     public func slice(_ target: LinuxTarget) -> URL? {
-        existing("lib/\(target.rawValue)/libapp.a")
+        existing(target.sharedLibrary)
     }
 
     public var wasm: URL? {

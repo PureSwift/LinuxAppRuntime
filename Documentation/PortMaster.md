@@ -19,15 +19,22 @@ gameinfo.xml                EmulationStation metadata
 README.md                   notes and controls
 screenshot.png              the screenshot: --screenshot, or the app's icon
 <port>/
-  <executable>.aarch64      the host, linked with the app, per architecture
-  <executable>.armhf
+  <executable>.aarch64      the runner, linux-app-host, per architecture,
+  <executable>.armhf          named after the app
   libs.aarch64/             SDL3 and SDL3_ttf, built for old glibc
   libs.armhf/
-  App.app/                  Info.plist and resources
+  App.app/                  the bundle, thinned: Info.plist, resources,
+                              its signature, and lib/linux-arm64/libapp.so
+                              and lib/linux-armv7/libapp.so
   fonts/                    DejaVu, for devices without fontconfig
   <port>.gptk               gptokeyb's mapping
   licenses/
 ```
+
+A handheld has no runner installed, so the port carries its own: the same
+program for every app, which loads `App.app/lib/<target>/libapp.so`
+(Plan.md §4). It's named after the app, so that's what the device shows
+running and what gptokeyb watches.
 
 `<port>` is the executable's name in lowercase. Packaging one architecture
 into a directory that has the other adds to it: `port.json`'s `arch` lists
@@ -86,14 +93,15 @@ two images `Scripts/portmaster.sh` uses:
 
 Swift is linked statically. The armhf build goes through SwiftPM's native
 build system, since the default one ignores destination files. Ubuntu
-22.04's glibc has no `arc4random_buf`, which app slices call, so the host
-supplies it there (`CLinuxHost`). fontconfig is loaded at run time if it's there;
+22.04's glibc has no `arc4random_buf`, which an app's library calls, so
+the runner defines and exports it there (`CLinuxHost`). fontconfig is loaded at run time if it's there;
 otherwise the host uses `fonts/`. The images say what they bundle
 (`LINUXAPPRUNTIME_PORT_LIBS`) and how to build (`LINUXAPPRUNTIME_SWIFT_SDK`
 for the armv7 SDK); `linux-app portmaster` reads both.
 
-The guest side is unchanged: the bundle's `linux-arm64` and `linux-armv7`
-slices are libc-agnostic, so they link into either host.
+The runner is what's built. The app isn't: its `linux-arm64` and
+`linux-armv7` `libapp.so` name no libc, so the same files load in a
+handheld's runner and a desktop's.
 
 ## 5. Testing
 
