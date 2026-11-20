@@ -52,7 +52,7 @@ AppRuntime's contracts.
 | arm64 and x86_64 Linux with glibc (Debian 13, Ubuntu 24.04+) | armv7, musl |
 | Native slices, loaded by the runner | `App.wasm`, in an engine in the runner; wasm2c for a target a bundle lacks, before it's installed |
 | Wayland and X11 through SDL3; a headless driver for tests | Multiple windows |
-| `Renderer`, `BluetoothCentral` and friends, GL surfaces, web views, files, settings, model stores, date and number formatting, the built-ins | Location (GeoClue), Device (UPower, sysfs), Networking (libcurl), Motion (iio-sensor-proxy), NFC (neard) |
+| `Renderer`, `BluetoothCentral` and friends, GL surfaces, web views, files, settings, model stores, date and number formatting, the device, the built-ins | Location (GeoClue), Networking (libcurl), Motion (iio-sensor-proxy), NFC (neard) |
 
 ## 2. Process model
 
@@ -99,8 +99,9 @@ timers for `schedule`.
 | `LinuxGraphics` | `Surface` over EGL and GLES 2.0, loaded at run time; the player's `GLSurface` view shows it (§7) |
 | `LinuxWebKit` | `WebContent` over WPE WebKit, loaded at run time; the player's `WebView` view shows it (§8) |
 | `LinuxCoreModel` | `LinuxModelStore`: the model store over CoreModel-SQLite, through AppRuntime's `HostModelStore` (§9) |
+| `LinuxDevice` | `Device` from `/etc`, DMI, the device tree, and power and heat in sysfs (§10) |
 | `LinuxHostApp` | `main`: reads the app's keys, starts the host, and runs Cacao's SDL loop with one window showing the guest's first renderer |
-| `LinuxPackager`, `linux-app` | The packager (§11, [Packager.md](Packager.md)) |
+| `LinuxPackager`, `linux-app` | The packager (§12, [Packager.md](Packager.md)) |
 
 The package depends on AppRuntime without its `GuestExports` trait, like
 DarwinAppRuntime, so the slice's `rt_dispatch` and `rt_finalize` are the
@@ -396,7 +397,35 @@ SQLite one, CoreModel-SQLite, with SQLite compiled in, so a device needs no
   file that isn't a database `corrupted`, one that can't be opened or read
   `unavailable`.
 
-## 10. Testing
+## 10. The device
+
+`LinuxDevice` is the `Device` contract (AppRuntime's `Device.md`). Linux
+says what the machine is in files, so it's read from them, and nothing is
+asked of D-Bus:
+
+| | From |
+|---|---|
+| `name` | `PRETTY_HOSTNAME` in `/etc/machine-info`, else the host name |
+| `model` | DMI's product family or name, else the device tree's `model` |
+| `modelIdentifier` | DMI's product name, else the device tree's first `compatible` string, else `uname -m` |
+| `manufacturer` | DMI's system vendor, else the vendor in `compatible` |
+| `systemName`, `systemVersion` | `Linux`, and the kernel's version (`6.12`) |
+| `idiom` | `CHASSIS` in `/etc/machine-info`, else DMI's chassis type: a tablet is `pad`, a handset `phone`, a desktop, laptop or server `desktop` |
+| `vendorIdentifier` | A random UUID kept per vendor (the identifier without its last component) in `$XDG_DATA_HOME/linux-app/vendors`, or the container's `Vendors` |
+| Memory, processors, uptime | `ProcessInfo`, and `CLOCK_BOOTTIME` |
+| Battery | The machine's batteries in `/sys/class/power_supply` (not a mouse's: `scope` `Device`), their energy or charge together, and their `status` with the mains supply's `online` |
+| Low power mode | `/sys/firmware/acpi/platform_profile` at `low-power`, which power-profiles-daemon's power saver sets |
+| Thermal state | The hottest thermal zone against its own trip points: past `critical` or `hot`, critical; past `passive`, serious; within 10 °C of it, fair |
+
+- **Changes** are found by reading again every 5 seconds while the app has a
+  delegate, and told once each: battery level and state while battery
+  monitoring is on, low power and thermal state always.
+- **Firmware placeholders** in DMI ("To be filled by O.E.M.", "Default
+  string") count as nothing.
+- **Orientation and proximity** read as unknown and off: they come from
+  iio-sensor-proxy, with the motion contracts.
+
+## 11. Testing
 
 - `LinuxUI`: DarwinUI's tests, on Cacao (§5).
 - `LinuxBluetooth`: the contract against a fake `BlueZBus` that plays
@@ -412,6 +441,11 @@ SQLite one, CoreModel-SQLite, with SQLite compiled in, so a device needs no
   refused unsigned, changed after signing, or not listed; a symbol the
   process lacks named in the refusal; a library to preload that isn't
   there. Where installed apps are found.
+- `LinuxDevice`: a laptop's, a board's and an empty machine's files under a
+  temporary root: identity, idioms, batteries (energy and capacity, a
+  mouse's left out, each status), thermal states, low power, the vendor
+  identifier kept per vendor, and changes reaching the delegate once each,
+  by themselves on the main loop.
 - `LinuxCoreModel`: where stores are; about 500 requests answered as
   CoreModel's in-memory store answers them; every value there and back;
   batches applied whole or not at all; a store kept between launches,
@@ -433,7 +467,7 @@ SQLite one, CoreModel-SQLite, with SQLite compiled in, so a device needs no
 - Real BlueZ needs hardware: manual runs on a Raspberry Pi or a laptop with
   `bluetoothd`.
 
-## 11. Phases
+## 12. Phases
 
 1. **Host runtime and player**: `LinuxHost`, `LinuxUI`, `LinuxBluetooth`,
    `LinuxHostApp`; `ExampleUI` runs in Docker.
@@ -441,14 +475,14 @@ SQLite one, CoreModel-SQLite, with SQLite compiled in, so a device needs no
    thinned to the target's `libapp.so`, a `.desktop` file and icon, for
    the runner; later Flatpak and AppImage, whose manifests carry the
    capabilities (`--system-talk-name=org.bluez` for `bluetooth`).
-3. **More contracts**: Location (GeoClue2), Device (UPower, sysfs),
-   Networking (libcurl or AsyncHTTPClient), Motion (iio-sensor-proxy),
-   NFC (neard). Formatting is done: AppRuntime's `RuntimeFormatting`
-   (§3).
+3. **More contracts**: Location (GeoClue2), Networking (libcurl or
+   AsyncHTTPClient), Motion (iio-sensor-proxy), NFC (neard). Formatting is
+   done: AppRuntime's `RuntimeFormatting` (§3), and so is the device
+   (§10).
 4. **Player**: what DarwinUI and Cacao add: Cacao's AT-SPI bridge, input
    replay for end-to-end tests.
 
-## 12. Open questions
+## 13. Open questions
 
 - **Permissions.** Desktop Linux has no prompts for Bluetooth; Flatpak's
   portals cover location and the camera. `Permissions.request` answers from
