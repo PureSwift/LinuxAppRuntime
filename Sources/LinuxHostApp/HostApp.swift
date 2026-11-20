@@ -8,6 +8,7 @@ import LinuxBluetooth
 import LinuxCoreModel
 import LinuxDevice
 import LinuxGraphics
+import LinuxLocation
 import LinuxWebKit
 import LinuxUI
 import RuntimeFormatting
@@ -33,10 +34,10 @@ public enum HostApp {
     /// Every module this host has: the SwiftUI player (DarwinUI, on Cacao),
     /// Bluetooth, GL surfaces and web pages, which the player shows, the
     /// app's files, settings and model stores, AppRuntime's date and number
-    /// formatting over Swift Foundation, and the device.
+    /// formatting over Swift Foundation, the device, and location.
     public static let modules: [any HostModule.Type] = [
         DarwinUI.self, LinuxBluetooth.self, LinuxGraphics.self, LinuxWebKit.self, LinuxFiles.self, LinuxDefaults.self,
-        LinuxModelStore.self, HostFormattingModule.self, LinuxDeviceModule.self,
+        LinuxModelStore.self, HostFormattingModule.self, LinuxDeviceModule.self, LinuxLocation.self,
     ]
 
     /// The window's title: the app's name.
