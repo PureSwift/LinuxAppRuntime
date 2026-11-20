@@ -25,14 +25,18 @@ public enum LinuxTarget: String, CaseIterable, Sendable {
         }
     }
 
-    /// The build machine's target, which is what the packager builds for.
+    /// This machine's target; nil on one that isn't a Linux target.
     public static var native: LinuxTarget? {
+        target(machine: machineName)
+    }
+
+    /// `uname -m`: `aarch64`, `x86_64`, `armv7l`.
+    public static var machineName: String {
         var name = utsname()
         uname(&name)
-        let machine = withUnsafeBytes(of: &name.machine) { bytes in
+        return withUnsafeBytes(of: &name.machine) { bytes in
             String(decoding: bytes.prefix { $0 != 0 }, as: UTF8.self)
         }
-        return target(machine: machine)
     }
 
     public static func target(machine: String) -> LinuxTarget? {
