@@ -2,6 +2,7 @@ import DynamicRuntime
 import Foundation
 import LinuxBluetooth
 import LinuxCoreModel
+import LinuxDevice
 import LinuxGraphics
 import LinuxWebKit
 import LinuxHost
@@ -14,10 +15,11 @@ public enum HostContracts {
 
     /// The modules `linux-app-host` registers (`HostApp.modules`): the
     /// player's contracts, without building the player, Bluetooth,
-    /// graphics, web views, files, settings, model stores and formatting.
+    /// graphics, web views, files, settings, model stores, formatting and
+    /// the device.
     nonisolated(unsafe) public static let modules: [any HostModule.Type] = [
         PlayerContracts.self, LinuxBluetooth.self, LinuxGraphics.self, LinuxWebKit.self, LinuxFiles.self, LinuxDefaults.self,
-        LinuxModelStore.self, HostFormattingModule.self,
+        LinuxModelStore.self, HostFormattingModule.self, LinuxDeviceModule.self,
     ]
 
     public static var provided: [String: ContractDescriptor] {
