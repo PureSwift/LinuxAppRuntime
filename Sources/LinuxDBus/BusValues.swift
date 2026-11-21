@@ -1,4 +1,4 @@
-import DBUS
+import DBus
 
 /// An error a service, or the bus, answered with: a D-Bus error name and
 /// its message.
@@ -78,6 +78,12 @@ public struct MatchRule: Hashable, Sendable, CustomStringConvertible {
         self.arg0 = arg0
     }
 
+    /// The bus's own `Disconnected` signal, which its subscribers get when
+    /// its connection closes, or can't be made, with why as its argument.
+    /// It's local: the bus isn't asked for it.
+    public static let disconnected = MatchRule(path: "/org/freedesktop/DBus/Local", interface: "org.freedesktop.DBus.Local",
+                                               member: "Disconnected")
+
     /// The rule as `AddMatch` takes it.
     public var description: String {
         var parts = ["type='signal'"]
@@ -117,9 +123,9 @@ public struct BusSignal: Sendable, Equatable {
 
     public var member: String
 
-    public var body: [DBusValue]
+    public var body: [DBusMessageArgument]
 
-    public init(sender: String? = nil, path: String, interface: String, member: String, body: [DBusValue] = []) {
+    public init(sender: String? = nil, path: String, interface: String, member: String, body: [DBusMessageArgument] = []) {
         self.sender = sender
         self.path = path
         self.interface = interface
@@ -130,20 +136,20 @@ public struct BusSignal: Sendable, Equatable {
 
 // MARK: - Values
 
-/// Reading values out of replies. The names differ from LinuxBluetooth's
-/// own helpers, so a file can import both.
-public extension DBusValue {
+/// Reading values out of replies, and making the ones requests need.
+public extension DBusMessageArgument {
 
     /// The value inside any variants.
-    var contents: DBusValue {
-        if case .variant(let variant) = self { return variant.value.contents }
+    var contents: DBusMessageArgument {
+        if case .variant(let variant) = self { return variant.element.contents }
         return self
     }
 
     /// A string or an object path.
     var text: String? {
         switch contents {
-        case .string(let string), .objectPath(let string): string
+        case .string(let string): string
+        case .objectPath(let path): path.rawValue
         default: nil
         }
     }
@@ -174,28 +180,67 @@ public extension DBusValue {
     }
 
     /// A struct's fields.
-    var fields: [DBusValue]? {
-        if case .structure(let fields) = contents { return fields }
+    var fields: [DBusMessageArgument]? {
+        if case .struct(let structure) = contents { return Swift.Array(structure) }
+        return nil
+    }
+
+    /// An array's elements.
+    var elements: [DBusMessageArgument]? {
+        if case .array(let array) = contents { return Swift.Array(array) }
+        return nil
+    }
+
+    /// A dictionary's entries, in the order they came.
+    var pairs: [(key: DBusMessageArgument, value: DBusMessageArgument)]? {
+        if case .dictionary(let dictionary) = contents { return dictionary.map { ($0.key, $0.value) } }
         return nil
     }
 
     /// `a{sv}` with string keys, the variants unwrapped.
-    var entries: [String: DBusValue] {
-        guard case .dictionary(let dictionary) = contents else { return [:] }
-        var entries: [String: DBusValue] = [:]
-        for (key, value) in dictionary {
+    var entries: [String: DBusMessageArgument] {
+        var entries: [String: DBusMessageArgument] = [:]
+        for (key, value) in pairs ?? [] {
             guard let key = key.text else { continue }
             entries[key] = value.contents
         }
         return entries
     }
 
-    /// `a{sv}`.
-    static func vardict(_ entries: [String: DBusValue]) -> DBusValue {
-        var dictionary: [DBusValue: DBusValue] = [:]
-        for (key, value) in entries {
-            dictionary[.string(key)] = .variant(DBusVariant(value))
+    /// `a{sv}`, its keys in order.
+    static func vardict(_ entries: [String: DBusMessageArgument]) -> DBusMessageArgument {
+        let entries = entries.sorted { $0.key < $1.key }.map { key, value in
+            Dictionary.Entry(key: .string(key), value: .variant(Variant(value)))
         }
-        return .dictionary(dictionary)
+        return .dictionary(Dictionary(keyType: .string, valueType: .variant, entries)!)
+    }
+
+    /// An object path, which must be a valid one.
+    static func path(_ path: String) -> DBusMessageArgument {
+        guard let path = DBusObjectPath(rawValue: path) else {
+            preconditionFailure("not an object path: \(path)")
+        }
+        return .objectPath(path)
+    }
+
+    /// An array of `type`, which each element must be.
+    static func list(of type: DBusSignature.ValueType, _ elements: [DBusMessageArgument]) -> DBusMessageArgument {
+        guard let array = Array(type: type, elements) else {
+            preconditionFailure("not all \(String(type)): \(elements)")
+        }
+        return .array(array)
+    }
+
+    /// `as`.
+    static func stringArray(_ strings: [String]) -> DBusMessageArgument {
+        list(of: .string, strings.map { .string($0) })
+    }
+
+    /// A struct, of at least one field.
+    static func structure(_ fields: [DBusMessageArgument]) -> DBusMessageArgument {
+        guard let structure = Structure(fields) else {
+            preconditionFailure("a struct without fields")
+        }
+        return .struct(structure)
     }
 }
