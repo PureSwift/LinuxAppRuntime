@@ -1,4 +1,4 @@
-import DBUS
+import DBus
 import LinuxDBus
 
 /// GeoClue 2 on the system bus (`Plan.md` §11), or a fake one in tests.
@@ -7,22 +7,22 @@ import LinuxDBus
 public protocol GeoClueBus: AnyObject {
 
     /// Calls a method of one of GeoClue's objects.
-    func call(_ path: String, _ interface: String, _ method: String, _ arguments: [DBusValue],
-              reply: @escaping (Result<[DBusValue], BusError>) -> Void)
+    func call(_ path: String, _ interface: String, _ method: String, _ arguments: [DBusMessageArgument],
+              reply: @escaping (Result<[DBusMessageArgument], BusError>) -> Void)
 
     /// Reads one property, waiting for it: for the contract's synchronous
     /// calls.
-    func propertyAndWait(_ path: String, _ interface: String, _ name: String) -> Result<DBusValue, BusError>
+    func propertyAndWait(_ path: String, _ interface: String, _ name: String) -> Result<DBusMessageArgument, BusError>
 
     /// Every property of one of GeoClue's objects.
-    func properties(_ path: String, _ interface: String, reply: @escaping (Result<[String: DBusValue], BusError>) -> Void)
+    func properties(_ path: String, _ interface: String, reply: @escaping (Result<[String: DBusMessageArgument], BusError>) -> Void)
 
-    func setProperty(_ path: String, _ interface: String, _ name: String, _ value: DBusValue,
+    func setProperty(_ path: String, _ interface: String, _ name: String, _ value: DBusMessageArgument,
                      reply: @escaping (Result<Void, BusError>) -> Void)
 
     /// Calls `handler` with the arguments of each of the object's `member`
     /// signals.
-    func subscribe(_ path: String, _ interface: String, _ member: String, _ handler: @escaping ([DBusValue]) -> Void) -> BusSubscription
+    func subscribe(_ path: String, _ interface: String, _ member: String, _ handler: @escaping ([DBusMessageArgument]) -> Void) -> BusSubscription
 
     func unsubscribe(_ subscription: BusSubscription)
 }
@@ -63,25 +63,25 @@ public final class SystemGeoClue: GeoClueBus {
         self.bus = bus
     }
 
-    public func call(_ path: String, _ interface: String, _ method: String, _ arguments: [DBusValue],
-                     reply: @escaping (Result<[DBusValue], BusError>) -> Void) {
+    public func call(_ path: String, _ interface: String, _ method: String, _ arguments: [DBusMessageArgument],
+                     reply: @escaping (Result<[DBusMessageArgument], BusError>) -> Void) {
         bus.call(GeoClue.service, path, interface, method, arguments, reply: reply)
     }
 
-    public func propertyAndWait(_ path: String, _ interface: String, _ name: String) -> Result<DBusValue, BusError> {
+    public func propertyAndWait(_ path: String, _ interface: String, _ name: String) -> Result<DBusMessageArgument, BusError> {
         bus.propertyAndWait(GeoClue.service, path, interface, name)
     }
 
-    public func properties(_ path: String, _ interface: String, reply: @escaping (Result<[String: DBusValue], BusError>) -> Void) {
+    public func properties(_ path: String, _ interface: String, reply: @escaping (Result<[String: DBusMessageArgument], BusError>) -> Void) {
         bus.properties(GeoClue.service, path, interface, reply: reply)
     }
 
-    public func setProperty(_ path: String, _ interface: String, _ name: String, _ value: DBusValue,
+    public func setProperty(_ path: String, _ interface: String, _ name: String, _ value: DBusMessageArgument,
                             reply: @escaping (Result<Void, BusError>) -> Void) {
         bus.setProperty(GeoClue.service, path, interface, name, value, reply: reply)
     }
 
-    public func subscribe(_ path: String, _ interface: String, _ member: String, _ handler: @escaping ([DBusValue]) -> Void) -> BusSubscription {
+    public func subscribe(_ path: String, _ interface: String, _ member: String, _ handler: @escaping ([DBusMessageArgument]) -> Void) -> BusSubscription {
         bus.subscribe(MatchRule(sender: GeoClue.service, path: path, interface: interface, member: member)) { signal in
             handler(signal.body)
         }
