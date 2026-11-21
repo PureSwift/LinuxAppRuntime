@@ -4,6 +4,7 @@ import LinuxBluetooth
 import LinuxCoreModel
 import LinuxDevice
 import LinuxGraphics
+import LinuxLocation
 import LinuxWebKit
 import LinuxHost
 import DynamicUI
@@ -15,11 +16,11 @@ public enum HostContracts {
 
     /// The modules `linux-app-host` registers (`HostApp.modules`): the
     /// player's contracts, without building the player, Bluetooth,
-    /// graphics, web views, files, settings, model stores, formatting and
-    /// the device.
+    /// graphics, web views, files, settings, model stores, formatting, the
+    /// device and location.
     nonisolated(unsafe) public static let modules: [any HostModule.Type] = [
         PlayerContracts.self, LinuxBluetooth.self, LinuxGraphics.self, LinuxWebKit.self, LinuxFiles.self, LinuxDefaults.self,
-        LinuxModelStore.self, HostFormattingModule.self, LinuxDeviceModule.self,
+        LinuxModelStore.self, HostFormattingModule.self, LinuxDeviceModule.self, LinuxLocation.self,
     ]
 
     public static var provided: [String: ContractDescriptor] {
@@ -27,8 +28,8 @@ public enum HostContracts {
     }
 
     /// Capabilities some contract here serves: `network` is what lets a
-    /// web view's page reach the network.
-    public static let capabilities: Set<Capability> = [.bluetooth, .graphics, .network]
+    /// web view's page reach the network, and `location` GeoClue's.
+    public static let capabilities: Set<Capability> = [.bluetooth, .graphics, .network, .location]
 }
 
 /// The checks of `Packager.md` §1, which install makes before it copies an

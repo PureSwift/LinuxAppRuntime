@@ -30,13 +30,13 @@ import Testing
 
     @Test func contractsThisHostLacks() throws {
         let fixture = try Fixture(contracts: [
-            ("org.pureswift.location.LocationManager", 1, "contract"),
+            ("org.pureswift.motion.MotionManager", 1, "contract"),
             ("org.pureswift.ui.Renderer", 99, "contract"),
             ("org.pureswift.ui.RendererDelegate", 1, "contract"),
         ])
         let strict = try diagnostics(fixture)
         #expect(strict.filter { $0.severity == .error }.map(\.message) == [
-            "org.pureswift.location.LocationManager isn't implemented on Linux",
+            "org.pureswift.motion.MotionManager isn't implemented on Linux",
             "org.pureswift.ui.RendererDelegate is a different kind of interface on Linux",
         ])
         #expect(strict.contains { $0.severity == .warning && $0.message.contains("Renderer is version") })
@@ -53,6 +53,18 @@ import Testing
             ("org.pureswift.formatting.DateFormat", 1, "contract"),
         ])
         #expect(try diagnostics(fixture).isEmpty)
+    }
+
+    /// GeoClue's (`LinuxLocation`).
+    @Test func locationIsImplemented() throws {
+        let fixture = try Fixture(contracts: [
+            ("org.pureswift.ui.Renderer", 1, "contract"),
+            ("org.pureswift.location.LocationManager", 1, "contract"),
+            ("org.pureswift.location.LocationManagerDelegate", 1, "callback"),
+            ("org.pureswift.location.Location", 1, "contract"),
+            ("org.pureswift.location.Heading", 1, "contract"),
+        ], capabilities: ["location"])
+        #expect(try diagnostics(fixture).map(\.message) == [])
     }
 
     @Test func newerABIsAndBadNames() throws {
@@ -92,8 +104,8 @@ import Testing
     }
 
     @Test func capabilitiesWithoutSupportWarn() throws {
-        let messages = try diagnostics(Fixture(capabilities: ["bluetooth", "location"]))
-        #expect(messages == [.warning("the app declares location, which the Linux host doesn't support yet")])
+        let messages = try diagnostics(Fixture(capabilities: ["bluetooth", "location", "motion"]))
+        #expect(messages == [.warning("the app declares motion, which the Linux host doesn't support yet")])
     }
 
     @Test func theHostAndThePackagerAgreeOnModules() {

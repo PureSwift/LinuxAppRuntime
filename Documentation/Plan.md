@@ -52,7 +52,7 @@ AppRuntime's contracts.
 | arm64 and x86_64 Linux with glibc (Debian 13, Ubuntu 24.04+) | armv7, musl |
 | Native slices, loaded by the runner | `App.wasm`, in an engine in the runner; wasm2c for a target a bundle lacks, before it's installed |
 | Wayland and X11 through SDL3; a headless driver for tests | Multiple windows |
-| `Renderer`, `BluetoothCentral` and friends, GL surfaces, web views, files, settings, model stores, date and number formatting, the device, the built-ins | Location (GeoClue), Networking (libcurl), Motion (iio-sensor-proxy), NFC (neard) |
+| `Renderer`, `BluetoothCentral` and friends, GL surfaces, web views, files, settings, model stores, date and number formatting, the device, location, the built-ins | Networking (libcurl), Motion (iio-sensor-proxy), NFC (neard) |
 
 ## 2. Process model
 
@@ -100,8 +100,10 @@ timers for `schedule`.
 | `LinuxWebKit` | `WebContent` over WPE WebKit, loaded at run time; the player's `WebView` view shows it (§8) |
 | `LinuxCoreModel` | `LinuxModelStore`: the model store over CoreModel-SQLite, through AppRuntime's `HostModelStore` (§9) |
 | `LinuxDevice` | `Device` from `/etc`, DMI, the device tree, and power and heat in sysfs (§10) |
+| `LinuxDBus` | `Bus`: the system and session buses, for the modules that talk to system services: method calls, properties and signals by match rule, delivered on the main loop (§11.1) |
+| `LinuxLocation` | `LocationManager`, `Location` and `Heading` over GeoClue 2 (§11) |
 | `LinuxHostApp` | `main`: reads the app's keys, starts the host, and runs Cacao's SDL loop with one window showing the guest's first renderer |
-| `LinuxPackager`, `linux-app` | The packager (§12, [Packager.md](Packager.md)) |
+| `LinuxPackager`, `linux-app` | The packager (§13, [Packager.md](Packager.md)) |
 
 The package depends on AppRuntime without its `GuestExports` trait, like
 DarwinAppRuntime, so the slice's `rt_dispatch` and `rt_finalize` are the
@@ -425,7 +427,87 @@ asked of D-Bus:
 - **Orientation and proximity** read as unknown and off: they come from
   iio-sensor-proxy, with the motion contracts.
 
-## 11. Testing
+## 11. Location
+
+`LinuxLocation` is the Location contracts (AppRuntime's `Location.md`) over
+GeoClue 2, on the system bus. Each `LocationManager` has a GeoClue client
+of its own, made when it first needs one:
+
+| | GeoClue |
+|---|---|
+| The client | `Manager.CreateClient`, deleted with the manager; `GetClient` on a GeoClue before 2.5, whose one client the process shares |
+| Who's asking | The client's `DesktopId`: the app's identifier, which is its installed `<identifier>.desktop` file's name |
+| `setDesiredAccuracy` | `RequestedAccuracyLevel`: `best` and `nearestTenMeters` exact, `hundredMeters` street, `kilometer` neighborhood, `reduced` city. GeoClue reads it on `Start`, so a running client starts again |
+| `setDistanceFilter` | `DistanceThreshold`, in whole meters, rounded up; the manager also leaves out locations nearer than that to the last one it delivered. `TimeThreshold` is 0 (a GeoClue without it is fine) |
+| `startUpdatingLocation`, `requestLocation` | `Start`; `requestLocation` stops again after one location, unless updates are on |
+| `stopUpdatingLocation` | `Stop` |
+| Locations | `LocationUpdated(o old, o new)`, then the new `Location` object's `Latitude`, `Longitude`, `Accuracy`, `Altitude` (`-G_MAXDOUBLE` unknown: `nan`), `Speed` and `Heading` (`-1` unknown), and `Timestamp` (`(tt)`, seconds and microseconds). Vertical, speed and course accuracy are unknown, and so is whether it's simulated (`-1`) |
+| `isLocationServicesEnabled` | GeoClue answers `Manager.AvailableAccuracyLevel` within two seconds (it's started on demand), above none |
+| Heading | Not available: Linux has no compass service. `startUpdatingHeading` fails with `headingFailure` |
+
+- **Authorization** is GeoClue's agent's. When a client starts, GeoClue
+  asks the agent of the user's session (gnome-shell's shows a prompt naming
+  the app from its desktop file, and remembers the answer by desktop ID);
+  a refusal is `AccessDenied` from `Start`. GeoClue has nothing to ask
+  beforehand, so the status is `notDetermined` until a client starts in
+  this process: `requestWhenInUseAuthorization()` starts the manager's
+  client, and stops it again if nothing wants updates. Started, it's
+  `authorizedAlways`; refused, `denied`. As on macOS, an app isn't
+  suspended, so the one answer covers the background (`requestAlways…` is
+  the same request, and `setBackgroundUpdatesEnabled` has nothing to do),
+  and accuracy is `full`: GeoClue doesn't say what level the agent
+  allowed. Every manager hears of a change once; a request is always
+  answered. A later start asks again, so a mind changed in Settings is
+  noticed.
+- **Permissions** for `location`: `granted` and `denied` as above,
+  `unavailable` without GeoClue, else `notDetermined`; `request` starts
+  and stops a client of its own.
+- **Without GeoClue** on the bus, or without a bus, the static calls answer
+  at once (services off, `notDetermined`) and starting fails with
+  `servicesDisabled`, as does GeoClue's "Geolocation disabled" refusal,
+  which is the desktop's location switch, not the app's answer. Other
+  errors are `unknown`, and logged.
+- **The bus's policy.** GeoClue's own policy
+  (`/usr/share/dbus-1/system.d/org.freedesktop.GeoClue2.conf`) lets any
+  user call it. A sandbox has to let the app talk to
+  `org.freedesktop.GeoClue2` on the system bus (Flatpak's
+  `--system-talk-name=org.freedesktop.GeoClue2`), or use the desktop
+  portal's location instead, later.
+- **The agent.** Without one in the user's session GeoClue refuses every
+  app ("disallowed, no agent"), which reads as `denied`. GNOME's is
+  gnome-shell; elsewhere, GeoClue's demo agent
+  (`/usr/libexec/geoclue-2.0/demos/agent`) allows everything. A device
+  without a session, such as a kiosk, allows the app in
+  `/etc/geoclue/geoclue.conf` instead: a section named for its identifier
+  with `allowed=true`, `system=true` and `users=`.
+- **Not done:** GeoClue leaving the bus while a client runs (restarted by
+  systemd, say) isn't noticed; updates just stop.
+
+### 11.1 D-Bus
+
+`LinuxDBus` is what Location, and later Motion (iio-sensor-proxy), NFC
+(neard) and the desktop portal, share. `Bus.system` and `Bus.session` are
+one connection each per process, made on first use through
+`wendylabsinc/dbus`; Bluetooth keeps its own, for now.
+
+- The connection is on D-Bus's own threads (SwiftNIO's): a writer task
+  sends requests in the order they were made, and a read loop hands each
+  reply to its caller and each signal to the bus. Everything is posted to
+  `MainLoop.shared`, so callers are only called on the main thread, and
+  never inside their own call.
+- `call`, `property`, `properties` (`GetAll`), `setProperty` (the value in
+  a variant of its own type) and `subscribe(MatchRule)`, whose rule is
+  added to the bus once however many subscriptions share it, and removed
+  with the last. Signals are told apart again on this side by path,
+  interface, member and `arg0`; a well-known sender is the bus's to check.
+- `callAndWait` and `propertyAndWait` wait on the calling thread for a
+  contract that answers at once; replies don't need the main loop, so the
+  main thread can wait.
+- If the connection closes, waiting calls fail with `Disconnected`; the
+  next request connects again, and the rules are added again. Without a
+  bus, calls fail with `NoServer`.
+
+## 12. Testing
 
 - `LinuxUI`: DarwinUI's tests, on Cacao (§5).
 - `LinuxBluetooth`: the contract against a fake `BlueZBus` that plays
@@ -446,6 +528,20 @@ asked of D-Bus:
   mouse's left out, each status), thermal states, low power, the vendor
   identifier kept per vendor, and changes reaching the delegate once each,
   by themselves on the main loop.
+- `LinuxLocation`: the contract against a fake `GeoClueBus` that plays
+  GeoClue's manager, clients, agent and locations. Runs on macOS and Linux:
+  nothing asked until a client's needed; the client's desktop ID and
+  settings before `Start`; authorization granted, refused and asked again,
+  every manager told once, and `Permissions`; updates and their values,
+  and what GeoClue doesn't know; one location; the distance and time
+  thresholds; accuracy, which restarts a running client; stopping,
+  including before GeoClue answers, and a manager deleting its client; an
+  older GeoClue; no GeoClue, and the desktop's switch off; heading; the
+  module's contracts.
+- `LinuxDBus`: match rules and their matching, errors and values; no bus;
+  and, where `dbus-daemon` is installed, a daemon of the test's own: calls
+  waited for and on the main loop, properties, an error, and a signal by
+  match rule from another connection.
 - `LinuxCoreModel`: where stores are; about 500 requests answered as
   CoreModel's in-memory store answers them; every value there and back;
   batches applied whole or not at all; a store kept between launches,
@@ -465,9 +561,10 @@ asked of D-Bus:
   changed; and launched twice on one container, with to-dos written into
   its SQLite database between the launches: the second shows them.
 - Real BlueZ needs hardware: manual runs on a Raspberry Pi or a laptop with
-  `bluetoothd`.
+  `bluetoothd`. Real GeoClue needs a session with an agent, or the app
+  allowed in `geoclue.conf`.
 
-## 12. Phases
+## 13. Phases
 
 1. **Host runtime and player**: `LinuxHost`, `LinuxUI`, `LinuxBluetooth`,
    `LinuxHostApp`; `ExampleUI` runs in Docker.
@@ -475,14 +572,14 @@ asked of D-Bus:
    thinned to the target's `libapp.so`, a `.desktop` file and icon, for
    the runner; later Flatpak and AppImage, whose manifests carry the
    capabilities (`--system-talk-name=org.bluez` for `bluetooth`).
-3. **More contracts**: Location (GeoClue2), Networking (libcurl or
-   AsyncHTTPClient), Motion (iio-sensor-proxy), NFC (neard). Formatting is
-   done: AppRuntime's `RuntimeFormatting` (§3), and so is the device
-   (§10).
+3. **More contracts**: Networking (libcurl or AsyncHTTPClient), Motion
+   (iio-sensor-proxy), NFC (neard). Formatting is done: AppRuntime's
+   `RuntimeFormatting` (§3), and so are the device (§10) and location
+   (§11), over GeoClue2.
 4. **Player**: what DarwinUI and Cacao add: Cacao's AT-SPI bridge, input
    replay for end-to-end tests.
 
-## 13. Open questions
+## 14. Open questions
 
 - **Permissions.** Desktop Linux has no prompts for Bluetooth; Flatpak's
   portals cover location and the camera. `Permissions.request` answers from
