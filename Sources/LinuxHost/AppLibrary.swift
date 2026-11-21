@@ -17,7 +17,7 @@ import RuntimeNative
 /// Before it's loaded, its contents are checked against the bundle's
 /// `_CodeSignature/CodeResources`, and the bytes checked are the ones
 /// loaded: the file is opened once, hashed, and loaded through its
-/// descriptor.
+/// descriptor, which stays open as long as the library.
 public struct AppLibrary {
 
     /// The library's path in the bundle.
@@ -42,7 +42,12 @@ public struct AppLibrary {
         guard descriptor >= 0 else {
             throw AppLibraryError("the app has no \(target.rawValue) slice: \(relative): \(String(cString: strerror(errno)))")
         }
-        defer { close(descriptor) }
+        var keepsDescriptor = false
+        defer {
+            if !keepsDescriptor {
+                close(descriptor)
+            }
+        }
         guard let contents = read(descriptor) else {
             throw AppLibraryError("can't read \(relative): \(String(cString: strerror(errno)))")
         }
@@ -63,6 +68,11 @@ public struct AppLibrary {
         guard let handle = dlopen(loadPath, RTLD_NOW | RTLD_LOCAL) else {
             throw AppLibraryError("can't load \(relative): \(lastError())")
         }
+        // glibc knows a library by the name it was loaded as, and answers a
+        // later `dlopen` of that name with it, without opening anything. So
+        // the descriptor stays open as long as the library does, and no
+        // other library is loaded under its `/proc/self/fd` name.
+        keepsDescriptor = loadPath == byDescriptor
         // Never closed: the app runs as long as the process does.
         func symbol(_ name: String) throws(AppLibraryError) -> UnsafeMutableRawPointer {
             guard let address = dlsym(handle, name) else {
