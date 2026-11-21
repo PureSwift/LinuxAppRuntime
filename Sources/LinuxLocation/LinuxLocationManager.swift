@@ -22,7 +22,9 @@ import LinuxHost
 /// - **Services** are enabled when GeoClue answers on the system bus with
 ///   an available accuracy above none. Without GeoClue, starting fails
 ///   with `servicesDisabled`, and so does GeoClue's "Geolocation disabled"
-///   (the desktop's location switch is off).
+///   (the desktop's location switch is off). A request then reads as
+///   `denied`, as CoreLocation's does with location off, so the app hears
+///   an answer; it isn't the app's refusal, and GeoClue starting clears it.
 /// - **Updates** come from the client's `LocationUpdated` signal. GeoClue
 ///   keeps to the distance filter (`DistanceThreshold`), and so does the
 ///   manager, from the last location it delivered.
@@ -214,6 +216,8 @@ public final class LinuxLocationManager: LocationManager {
         let decide = {
             if failure == .denied {
                 LocationAuthority.shared.decide(.denied)
+            } else if failure == .servicesDisabled && requested {
+                LocationAuthority.shared.servicesUnavailable()
             }
         }
         if requested {
@@ -340,7 +344,16 @@ final class LocationAuthority {
 
     nonisolated(unsafe) static var shared = LocationAuthority()
 
-    private(set) var status = LocationAuthorization.notDetermined
+    /// GeoClue's answer for the app.
+    private(set) var answer = LocationAuthorization.notDetermined
+
+    /// A request found GeoClue missing or the desktop's switch off.
+    private(set) var servicesOff = false
+
+    /// The answer, or `denied` while a request found location off.
+    var status: LocationAuthorization {
+        answer == .notDetermined && servicesOff ? .denied : answer
+    }
 
     private var managers: [Weak] = []
 
@@ -356,10 +369,23 @@ final class LocationAuthority {
         managers.append(Weak(manager: manager))
     }
 
-    /// Records an answer, telling every manager if it changed.
-    func decide(_ status: LocationAuthorization) {
-        guard status != self.status else { return }
-        self.status = status
+    /// Records an answer, telling every manager if the status changed.
+    func decide(_ answer: LocationAuthorization) {
+        change {
+            self.answer = answer
+            servicesOff = false
+        }
+    }
+
+    /// A request found location off: `denied` until GeoClue answers.
+    func servicesUnavailable() {
+        change { servicesOff = true }
+    }
+
+    private func change(_ body: () -> Void) {
+        let before = status
+        body()
+        guard status != before else { return }
         managers.removeAll { $0.manager == nil }
         for entry in managers {
             entry.manager?.reportAuthorization(force: false)
@@ -378,8 +404,10 @@ final class LocationAuthority {
                 self?.decide(.authorizedAlways)
                 completion(nil)
             case .failure(let error):
-                if LinuxLocationManager.error(error) == .denied {
-                    self?.decide(.denied)
+                switch LinuxLocationManager.error(error) {
+                case .denied: self?.decide(.denied)
+                case .servicesDisabled: self?.servicesUnavailable()
+                default: break
                 }
                 completion(error)
             }
