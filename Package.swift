@@ -67,6 +67,8 @@ let package = Package(
         .library(name: "LinuxWebKit", targets: ["LinuxWebKit"]),
         .library(name: "LinuxCoreModel", targets: ["LinuxCoreModel"]),
         .library(name: "LinuxDevice", targets: ["LinuxDevice"]),
+        .library(name: "LinuxDBus", targets: ["LinuxDBus"]),
+        .library(name: "LinuxLocation", targets: ["LinuxLocation"]),
         .library(name: "LinuxHostApp", targets: ["LinuxHostApp"]),
         .executable(name: "linux-app-host", targets: ["LinuxAppHost"]),
         .executable(name: "linux-app", targets: ["LinuxAppTool"]),
@@ -74,7 +76,8 @@ let package = Package(
     dependencies: [
         appRuntime,
         cacao,
-        // D-Bus, which Bluetooth talks to BlueZ over; it has no releases.
+        // D-Bus, which Bluetooth talks to BlueZ over, and Location to
+        // GeoClue; it has no releases.
         .package(url: "https://github.com/wendylabsinc/dbus.git", revision: "5727296ecaef9655b781f82c7ebde5c9f0d45551"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.4.0"),
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
@@ -165,6 +168,29 @@ let package = Package(
             swiftSettings: host
         ),
 
+        // MARK: - D-Bus
+
+        // The system and session buses, for the modules that talk to
+        // system services: calls, properties and signals, on the main loop.
+        .target(
+            name: "LinuxDBus",
+            dependencies: [
+                "LinuxHost",
+                .product(name: "DBUS", package: "dbus"),
+                .product(name: "Logging", package: "swift-log"),
+            ],
+            swiftSettings: host
+        ),
+
+        // MARK: - Location
+
+        // GeoClue 2 on the system bus.
+        .target(
+            name: "LinuxLocation",
+            dependencies: ["LinuxHost", "LinuxDBus", runtime("DynamicLocation"), runtime("DynamicRuntime"), .product(name: "DBUS", package: "dbus")],
+            swiftSettings: host
+        ),
+
         // MARK: - App
 
         // What the runner's process supplies that libc may not
@@ -172,7 +198,7 @@ let package = Package(
         .target(name: "CLinuxHost"),
         .target(
             name: "LinuxHostApp",
-            dependencies: ["LinuxHost", "LinuxUI", "LinuxBluetooth", "LinuxGraphics", "LinuxWebKit", "LinuxCoreModel", "LinuxDevice", "CLinuxHost", runtime("CRuntime"), runtime("RuntimeFormatting"),
+            dependencies: ["LinuxHost", "LinuxUI", "LinuxBluetooth", "LinuxGraphics", "LinuxWebKit", "LinuxCoreModel", "LinuxDevice", "LinuxLocation", "CLinuxHost", runtime("CRuntime"), runtime("RuntimeFormatting"),
                            runtime("DynamicGraphics"), .product(name: "CacaoSDL", package: "Cacao")],
             swiftSettings: host
         ),
@@ -196,7 +222,7 @@ let package = Package(
         // doesn't build Cacao.
         .target(
             name: "LinuxPackager",
-            dependencies: ["LinuxHost", "LinuxBluetooth", "LinuxGraphics", "LinuxWebKit", "LinuxCoreModel", "LinuxDevice", runtime("RuntimeFormatting"), runtime("DynamicUI"),
+            dependencies: ["LinuxHost", "LinuxBluetooth", "LinuxGraphics", "LinuxWebKit", "LinuxCoreModel", "LinuxDevice", "LinuxLocation", runtime("RuntimeFormatting"), runtime("DynamicUI"),
                            .product(name: "Crypto", package: "swift-crypto")]
         ),
         .executableTarget(
@@ -222,6 +248,9 @@ let package = Package(
             swiftSettings: host
         ),
         .testTarget(name: "LinuxDeviceTests", dependencies: ["LinuxDevice", runtime("DynamicDevice")], swiftSettings: host),
+        .testTarget(name: "LinuxDBusTests", dependencies: ["LinuxDBus", .product(name: "DBUS", package: "dbus")], swiftSettings: host),
+        .testTarget(name: "LinuxLocationTests", dependencies: ["LinuxLocation", "LinuxDBus", runtime("DynamicLocation"), .product(name: "DBUS", package: "dbus")],
+                    swiftSettings: host),
         .testTarget(name: "LinuxWebKitTests", dependencies: ["LinuxWebKit", runtime("DynamicWebKit")], swiftSettings: host),
         .testTarget(name: "LinuxPackagerTests", dependencies: ["LinuxPackager", "LinuxHostApp"]),
     ]
