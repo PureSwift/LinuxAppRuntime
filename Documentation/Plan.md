@@ -52,7 +52,7 @@ contracts. D-Bus is PureSwift/DBus, in Swift, without libdbus.
 | arm64 and x86_64 Linux with glibc (Debian 13, Ubuntu 24.04+) | armv7, musl |
 | Native slices, loaded by the runner | `App.wasm`, in an engine in the runner; wasm2c for a target a bundle lacks, before it's installed |
 | Wayland and X11 through SDL3; a headless driver for tests | Multiple windows |
-| `Renderer`, `BluetoothCentral` and friends, GL surfaces, web views, files, settings, model stores, date and number formatting, the device, location, the built-ins | Networking (libcurl), Motion (iio-sensor-proxy), NFC (neard) |
+| `Renderer`, `BluetoothCentral` and friends, GL surfaces, web views, files, settings, model stores, date and number formatting, HTTP, the device, location, the built-ins | Motion (iio-sensor-proxy), NFC (neard) |
 
 ## 2. Process model
 
@@ -71,7 +71,7 @@ contracts. D-Bus is PureSwift/DBus, in Swift, without libdbus.
 ```
 
 Everything that calls the guest runs on the main thread (§6.4). Work on
-other threads (D-Bus, later networking) posts its results to the
+other threads (D-Bus, `URLSession`) posts its results to the
 `MainLoop`.
 
 ### 2.1 The main loop
@@ -118,6 +118,19 @@ every host written in Swift; this host registers them as they are:
   doesn't read the POSIX environment for the user's locale, so
   `RuntimeFormatting` does: `LC_ALL`, else `LANG`, and `LANGUAGE` for the
   preferred languages. The time zone is `TZ`, else the system's.
+- **HTTP** (`DynamicNetworking`): AppRuntime's `RuntimeNetworking`, the
+  sessions, requests, responses, tasks, credentials and URLs over
+  `URLSession`, which on Linux is `FoundationNetworking` over libcurl.
+  `URLSession` calls back on a queue of each session's own, and the
+  default `HostNetworkingModule.deliver` is the main dispatch queue, which
+  nothing drains without a window; so the runner points it at
+  `MainLoop.shared.post`, and `HostNetworkingModule.log` at the host's
+  log, before the app starts. `HTTPSession` requires `network`, so an app
+  that doesn't declare it gets no session. swift-corelibs-foundation's
+  `URLSession` has no expensive or constrained networks and never waits
+  for connectivity, so those settings do nothing here; it answers only
+  Basic challenges with a credential. AppRuntime's `Implementation.md`
+  lists what else `RuntimeNetworking` hides.
 
 ## 4. Startup
 
@@ -563,6 +576,10 @@ their element types.
   resources, a refused connection, remote loads without `network`, frames
   and their pixels, a click, typing, and a resize. Every WebKit call is made
   on one thread, which WebKit takes for its main thread.
+- HTTP: the packager accepts an app that uses the networking contracts
+  and declares `network`, and a callback posted from another thread
+  reaches the main loop. The contracts themselves are AppRuntime's
+  `RuntimeNetworkingTests`, which run on Linux too.
 - End to end: AppRuntime's `ExampleUI`, `ExampleGL` and `ExampleModel`
   bundles, their `linux-arm64` `libapp.so` loaded by `linux-app-host` and
   run headless with SDL's `offscreen` driver, each first frame saved with
@@ -583,9 +600,9 @@ their element types.
    thinned to the target's `libapp.so`, a `.desktop` file and icon, for
    the runner; later Flatpak and AppImage, whose manifests carry the
    capabilities (`--system-talk-name=org.bluez` for `bluetooth`).
-3. **More contracts**: Networking (libcurl or AsyncHTTPClient), Motion
-   (iio-sensor-proxy), NFC (neard). Formatting is done: AppRuntime's
-   `RuntimeFormatting` (§3), and so are the device (§10) and location
+3. **More contracts**: Motion (iio-sensor-proxy), NFC (neard).
+   Formatting and HTTP are done: AppRuntime's `RuntimeFormatting` and
+   `RuntimeNetworking` (§3), and so are the device (§10) and location
    (§11), over GeoClue2.
 4. **Player**: what DarwinUI and Cacao add: Cacao's AT-SPI bridge, input
    replay for end-to-end tests.
