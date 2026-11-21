@@ -465,8 +465,10 @@ of its own, made when it first needs one:
 - **Without GeoClue** on the bus, or without a bus, the static calls answer
   at once (services off, `notDetermined`) and starting fails with
   `servicesDisabled`, as does GeoClue's "Geolocation disabled" refusal,
-  which is the desktop's location switch, not the app's answer. Other
-  errors are `unknown`, and logged.
+  which is the desktop's location switch, not the app's answer. A request
+  then reads as `denied`, as CoreLocation's does with location off, so an
+  app waiting for the answer gets one; it isn't kept as the app's refusal,
+  and GeoClue starting clears it. Other errors are `unknown`, and logged.
 - **The bus's policy.** GeoClue's own policy
   (`/usr/share/dbus-1/system.d/org.freedesktop.GeoClue2.conf`) lets any
   user call it. A sandbox has to let the app talk to
