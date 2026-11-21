@@ -62,7 +62,7 @@ added to its database between launches:
 | `LinuxDevice` | `Device`: the machine, its battery, power mode and heat, from `/etc`, DMI, the device tree and sysfs ([plan](Documentation/Plan.md) §10) |
 | `LinuxDBus` | `Bus`: the system and session buses for the modules that talk to system services, over PureSwift/DBus, with calls, properties and signals delivered on the main loop ([plan](Documentation/Plan.md) §11.1) |
 | `LinuxLocation` | `LocationManager`: the device's location from GeoClue 2 on the system bus, which its agent authorizes by the app's desktop ID; no heading ([plan](Documentation/Plan.md) §11) |
-| `LinuxHostApp`, `linux-app-host` | The app's `main`: the host, and Cacao's window and loop. It also registers AppRuntime's `RuntimeFormatting`, dates and numbers over Swift Foundation ([plan](Documentation/Plan.md) §3) |
+| `LinuxHostApp`, `linux-app-host` | The app's `main`: the host, and Cacao's window and loop. It also registers AppRuntime's `RuntimeFormatting`, dates and numbers over Swift Foundation, and `RuntimeNetworking`, HTTP over `URLSession` and libcurl ([plan](Documentation/Plan.md) §3) |
 | `LinuxPackager`, `linux-app` | The packager: validation, thinning a bundle to one target, the install tree, PortMaster ports |
 
 ## Building
