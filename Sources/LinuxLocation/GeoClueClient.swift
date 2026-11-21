@@ -1,4 +1,4 @@
-import DBUS
+import DBus
 import LinuxDBus
 import LinuxHost
 
@@ -62,7 +62,7 @@ final class GeoClueClient {
         }
     }
 
-    private func set(_ path: String, _ name: String, _ value: DBusValue) {
+    private func set(_ path: String, _ name: String, _ value: DBusMessageArgument) {
         bus.setProperty(path, GeoClue.client, name, value) { result in
             if case .failure(let error) = result {
                 HostLog.error("location: GeoClue didn't take \(name): \(error)")
@@ -127,7 +127,7 @@ final class GeoClueClient {
             self.subscription = nil
         }
         if let path, !shared {
-            bus.call(GeoClue.managerPath, GeoClue.manager, "DeleteClient", [.objectPath(path)]) { _ in }
+            bus.call(GeoClue.managerPath, GeoClue.manager, "DeleteClient", [.path(path)]) { _ in }
         }
         path = nil
     }
@@ -151,7 +151,7 @@ final class GeoClueClient {
                     switch result {
                     case .failure:
                         if !self.shared {
-                            self.bus.call(GeoClue.managerPath, GeoClue.manager, "DeleteClient", [.objectPath(path)]) { _ in }
+                            self.bus.call(GeoClue.managerPath, GeoClue.manager, "DeleteClient", [.path(path)]) { _ in }
                         }
                     case .success:
                         self.path = path
@@ -184,7 +184,7 @@ final class GeoClueClient {
         }
     }
 
-    private static func path(_ values: [DBusValue]) -> Result<String, BusError> {
+    private static func path(_ values: [DBusMessageArgument]) -> Result<String, BusError> {
         guard let path = values.first?.text else {
             return .failure(BusError(name: "org.freedesktop.DBus.Error.InvalidSignature", message: "no client path"))
         }
@@ -195,7 +195,7 @@ final class GeoClueClient {
     /// thresholds, in order. An older GeoClue without `TimeThreshold` is
     /// fine.
     private func configure(_ path: String, _ completion: @escaping (Result<Void, BusError>) -> Void) {
-        let settings: [(name: String, value: DBusValue, required: Bool)] = [
+        let settings: [(name: String, value: DBusMessageArgument, required: Bool)] = [
             ("DesktopId", .string(desktopID), true),
             ("RequestedAccuracyLevel", .uint32(accuracy.rawValue), true),
             ("DistanceThreshold", .uint32(distanceThreshold), false),
