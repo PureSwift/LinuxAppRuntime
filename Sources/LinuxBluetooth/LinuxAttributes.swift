@@ -1,5 +1,6 @@
 import Bluetooth
-import DBUS
+import DBus
+import LinuxDBus
 import DynamicBluetooth
 import DynamicRuntime
 
@@ -19,16 +20,16 @@ public final class LinuxService: BluetoothService {
         self.hub = hub
     }
 
-    private var object: [String: DBusValue] {
+    private var object: [String: DBusMessageArgument] {
         hub.properties(path, BlueZInterface.service) ?? [:]
     }
 
     public func uuid() throws(RuntimeError) -> BluetoothUUID {
-        try BlueZMapping.uuid(object["UUID"]?.stringValue)
+        try BlueZMapping.uuid(object["UUID"]?.text)
     }
 
     public func isPrimary() -> Bool {
-        object["Primary"]?.boolValue ?? true
+        object["Primary"]?.flag ?? true
     }
 
     public func characteristics() -> [any BluetoothCharacteristic] {
@@ -36,7 +37,7 @@ public final class LinuxService: BluetoothService {
     }
 
     public func peripheral() -> any BluetoothPeripheral {
-        hub.peripheral(object["Device"]?.stringValue ?? Self.parent(of: path))
+        hub.peripheral(object["Device"]?.text ?? Self.parent(of: path))
     }
 
     static func parent(of path: String) -> String {
@@ -69,12 +70,12 @@ public final class LinuxCharacteristic: BluetoothCharacteristic {
         self.hub = hub
     }
 
-    private var object: [String: DBusValue] {
+    private var object: [String: DBusMessageArgument] {
         hub.properties(path, BlueZInterface.characteristic) ?? [:]
     }
 
     public func uuid() throws(RuntimeError) -> BluetoothUUID {
-        try BlueZMapping.uuid(object["UUID"]?.stringValue)
+        try BlueZMapping.uuid(object["UUID"]?.text)
     }
 
     public func properties() -> Int32 {
@@ -86,7 +87,7 @@ public final class LinuxCharacteristic: BluetoothCharacteristic {
     }
 
     public func isNotifying() -> Bool {
-        notifying ?? object["Notifying"]?.boolValue ?? false
+        notifying ?? object["Notifying"]?.flag ?? false
     }
 
     public func descriptors() -> [any BluetoothDescriptor] {
@@ -94,14 +95,14 @@ public final class LinuxCharacteristic: BluetoothCharacteristic {
     }
 
     public func service() -> any BluetoothService {
-        hub.service(object["Service"]?.stringValue ?? LinuxService.parent(of: path))
+        hub.service(object["Service"]?.text ?? LinuxService.parent(of: path))
     }
 
     /// BlueZ's `Value` changed: a notification, unless a read asked for it.
     func valueChanged(_ value: [UInt8]) {
         guard !reading, isNotifying() else { return }
         lastValue = value
-        let devicePath = LinuxService.parent(of: object["Service"]?.stringValue ?? LinuxService.parent(of: path))
+        let devicePath = LinuxService.parent(of: object["Service"]?.text ?? LinuxService.parent(of: path))
         hub.peripheral(devicePath).notified(self, value)
     }
 }
@@ -122,12 +123,12 @@ public final class LinuxDescriptor: BluetoothDescriptor {
         self.hub = hub
     }
 
-    private var object: [String: DBusValue] {
+    private var object: [String: DBusMessageArgument] {
         hub.properties(path, BlueZInterface.descriptor) ?? [:]
     }
 
     public func uuid() throws(RuntimeError) -> BluetoothUUID {
-        try BlueZMapping.uuid(object["UUID"]?.stringValue)
+        try BlueZMapping.uuid(object["UUID"]?.text)
     }
 
     public func value() -> [UInt8]? {
@@ -135,21 +136,21 @@ public final class LinuxDescriptor: BluetoothDescriptor {
     }
 
     public func characteristic() -> any BluetoothCharacteristic {
-        hub.characteristic(object["Characteristic"]?.stringValue ?? LinuxService.parent(of: path))
+        hub.characteristic(object["Characteristic"]?.text ?? LinuxService.parent(of: path))
     }
 }
 
 /// What a device advertised, as BlueZ has it when it's reported.
 public final class LinuxAdvertisement: BluetoothAdvertisement {
 
-    let device: [String: DBusValue]
+    let device: [String: DBusMessageArgument]
 
-    init(_ device: [String: DBusValue]) {
+    init(_ device: [String: DBusMessageArgument]) {
         self.device = device
     }
 
     public func localName() -> String? {
-        device["Name"]?.stringValue
+        device["Name"]?.text
     }
 
     public func manufacturerData() -> [UInt8]? {
