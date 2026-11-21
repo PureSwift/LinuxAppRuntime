@@ -41,9 +41,9 @@ repository runs one on Linux:
 References like §7.6 are to `Documentation/DynamicRuntime.md` in AppRuntime;
 the render IR is `Documentation/RenderIR.md` there. Perry
 (MillerTechnologyPeru/Perry) runs iOS binaries on Linux and already talks to
-BlueZ; this host reuses its approach (BlueZ through `wendylabsinc/dbus`), not
-its code, since Perry implements Apple's ABI and this host implements
-AppRuntime's contracts.
+BlueZ; this host reuses its approach (BlueZ over D-Bus), not its code, since
+Perry implements Apple's ABI and this host implements AppRuntime's
+contracts. D-Bus is PureSwift/DBus, in Swift, without libdbus.
 
 ## 1. Scope
 
@@ -61,7 +61,7 @@ AppRuntime's contracts.
 │ LinuxHostApp main                                                │
 │   ├── runtime core: RuntimeCore + RuntimeNative (rt_* symbols)   │
 │   ├── MainLoop: timers, jobs from other threads                  │
-│   ├── LinuxBluetooth: BlueZ over D-Bus (NIO threads → MainLoop)  │
+│   ├── LinuxBluetooth: BlueZ over LinuxDBus (→ MainLoop)          │
 │   ├── LinuxGraphics: GL surfaces, EGL pbuffers read back         │
 │   ├── LinuxWebKit: WPE WebKit pages, frames in shared memory     │
 │   ├── LinuxUI: DarwinUI, render IR → SwiftUI views → events      │
@@ -197,13 +197,14 @@ Linux hosts then share one player.
 
 ## 6. Bluetooth over BlueZ
 
-One process-wide `BlueZHub` holds a D-Bus connection to the system bus
-(`wendylabsinc/dbus`, as Perry uses), a copy of BlueZ's objects from
-`GetManagedObjects` kept current by `InterfacesAdded`, `InterfacesRemoved`
-and `PropertiesChanged`, and one wrapper object per BlueZ path. D-Bus
-replies and signals are posted to the `MainLoop`, so the guest is only
-called on the main thread. `BlueZBus` abstracts the connection, so the
-contract logic is tested with a fake bus.
+One process-wide `BlueZHub` talks to BlueZ over `LinuxDBus`'s
+`Bus.system` (§11.1), the process's one system-bus connection, and holds a
+copy of BlueZ's objects from `GetManagedObjects` kept current by
+`InterfacesAdded`, `InterfacesRemoved` and `PropertiesChanged`, and one
+wrapper object per BlueZ path. D-Bus replies and signals are posted to the
+`MainLoop`, so the guest is only called on the main thread. If the bus
+closes, BlueZ is unavailable from then on. `BlueZBus` abstracts the
+connection, so the contract logic is tested with a fake bus.
 
 | Contract | BlueZ |
 |---|---|
@@ -487,16 +488,21 @@ of its own, made when it first needs one:
 
 ### 11.1 D-Bus
 
-`LinuxDBus` is what Location, and later Motion (iio-sensor-proxy), NFC
-(neard) and the desktop portal, share. `Bus.system` and `Bus.session` are
-one connection each per process, made on first use through
-`wendylabsinc/dbus`; Bluetooth keeps its own, for now.
+`LinuxDBus` is what Bluetooth and Location, and later Motion
+(iio-sensor-proxy), NFC (neard) and the desktop portal, share. `Bus.system`
+and `Bus.session` are one connection each per process, made on first use
+through PureSwift/DBus, which speaks D-Bus in Swift, without libdbus; its
+values are `DBusMessageArgument`s, whose arrays and dictionaries carry
+their element types.
 
-- The connection is on D-Bus's own threads (SwiftNIO's): a writer task
-  sends requests in the order they were made, and a read loop hands each
-  reply to its caller and each signal to the bus. Everything is posted to
-  `MainLoop.shared`, so callers are only called on the main thread, and
-  never inside their own call.
+- The connection is a `DBusConnection` on Swift's own threads: a writer
+  task starts requests in the order they were made, on the connection's
+  executor, and waits for the answer to one to the bus itself, such as
+  `AddMatch`, before the next, so a rule is in place before what's asked
+  after it; the connection's read loop hands each reply to its caller and
+  each signal to the bus. Everything is posted to `MainLoop.shared`, so
+  callers are only called on the main thread, and never inside their own
+  call.
 - `call`, `property`, `properties` (`GetAll`), `setProperty` (the value in
   a variant of its own type) and `subscribe(MatchRule)`, whose rule is
   added to the bus once however many subscriptions share it, and removed
@@ -505,9 +511,11 @@ one connection each per process, made on first use through
 - `callAndWait` and `propertyAndWait` wait on the calling thread for a
   contract that answers at once; replies don't need the main loop, so the
   main thread can wait.
-- If the connection closes, waiting calls fail with `Disconnected`; the
-  next request connects again, and the rules are added again. Without a
-  bus, calls fail with `NoServer`.
+- If the connection closes, waiting calls fail with `Disconnected`, and
+  subscribers to `MatchRule.disconnected` get the local
+  `org.freedesktop.DBus.Local.Disconnected` signal; the next request
+  connects again, and the rules are added again. Without a bus, calls fail
+  with `NoServer`.
 
 ## 12. Testing
 
@@ -542,8 +550,9 @@ one connection each per process, made on first use through
   module's contracts.
 - `LinuxDBus`: match rules and their matching, errors and values; no bus;
   and, where `dbus-daemon` is installed, a daemon of the test's own: calls
-  waited for and on the main loop, properties, an error, and a signal by
-  match rule from another connection.
+  waited for and on the main loop, properties, an error, a signal by match
+  rule from another connection, and connecting again, with the rules, once
+  the daemon's gone and another is in its place.
 - `LinuxCoreModel`: where stores are; about 500 requests answered as
   CoreModel's in-memory store answers them; every value there and back;
   batches applied whole or not at all; a store kept between launches,
