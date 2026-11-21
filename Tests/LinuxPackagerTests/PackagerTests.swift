@@ -1,5 +1,8 @@
+import Dispatch
 import Foundation
-import LinuxHostApp
+import LinuxHost
+@testable import LinuxHostApp
+import RuntimeNetworking
 import Testing
 @testable import LinuxPackager
 
@@ -65,6 +68,39 @@ import Testing
             ("org.pureswift.location.Heading", 1, "contract"),
         ], capabilities: ["location"])
         #expect(try diagnostics(fixture).map(\.message) == [])
+    }
+
+    /// AppRuntime's `RuntimeNetworking`, over `FoundationNetworking`.
+    @Test func networkingIsImplemented() throws {
+        let fixture = try Fixture(contracts: [
+            ("org.pureswift.ui.Renderer", 1, "contract"),
+            ("org.pureswift.network.HTTPSession", 1, "contract"),
+            ("org.pureswift.network.HTTPSessionConfiguration", 1, "contract"),
+            ("org.pureswift.network.HTTPRequest", 1, "contract"),
+            ("org.pureswift.network.HTTPResponse", 1, "contract"),
+            ("org.pureswift.network.HTTPTask", 1, "contract"),
+            ("org.pureswift.network.HTTPTaskDelegate", 1, "callback"),
+            ("org.pureswift.network.HTTPCredential", 1, "contract"),
+            ("org.pureswift.network.URL", 1, "contract"),
+        ], capabilities: ["network"])
+        #expect(try diagnostics(fixture).map(\.message) == [])
+    }
+
+    /// `URLSession`'s callbacks come from its own queues and must reach the
+    /// guest on the main loop, which doesn't drain the main dispatch queue
+    /// without a window.
+    @Test func networkingDeliversOnTheMainLoop() {
+        HostApp.configureModules()
+        final class Flag: @unchecked Sendable { var value = false }
+        let delivered = Flag()
+        let timedOut = Flag()
+        DispatchQueue.global().async {
+            HostNetworkingModule.deliver { delivered.value = true }
+        }
+        let timer = MainLoop.shared.schedule(after: 5_000_000_000) { timedOut.value = true }
+        MainLoop.shared.run { delivered.value || timedOut.value }
+        MainLoop.shared.cancel(timer)
+        #expect(delivered.value)
     }
 
     @Test func newerABIsAndBadNames() throws {

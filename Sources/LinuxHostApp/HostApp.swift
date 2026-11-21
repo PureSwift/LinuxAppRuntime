@@ -12,6 +12,7 @@ import LinuxLocation
 import LinuxWebKit
 import LinuxUI
 import RuntimeFormatting
+import RuntimeNetworking
 
 /// The runner (`Plan.md` §4): finds an app's bundle, checks the app
 /// against this host, loads its `libapp.so`, calls `rt_main`, and runs
@@ -34,11 +35,21 @@ public enum HostApp {
     /// Every module this host has: the SwiftUI player (DarwinUI, on Cacao),
     /// Bluetooth, GL surfaces and web pages, which the player shows, the
     /// app's files, settings and model stores, AppRuntime's date and number
-    /// formatting over Swift Foundation, the device, and location.
+    /// formatting and its HTTP client over Swift Foundation, the device, and
+    /// location.
     public static let modules: [any HostModule.Type] = [
         DarwinUI.self, LinuxBluetooth.self, LinuxGraphics.self, LinuxWebKit.self, LinuxFiles.self, LinuxDefaults.self,
-        LinuxModelStore.self, HostFormattingModule.self, LinuxDeviceModule.self, LinuxLocation.self,
+        LinuxModelStore.self, HostFormattingModule.self, HostNetworkingModule.self, LinuxDeviceModule.self, LinuxLocation.self,
     ]
+
+    /// Points AppRuntime's modules at this host: networking's callbacks,
+    /// which arrive on `URLSession`'s queues, go to the main loop, not the
+    /// main dispatch queue, which nothing drains without a window; and what
+    /// it couldn't do as asked goes to the host's log.
+    static func configureModules() {
+        HostNetworkingModule.deliver = { MainLoop.shared.post($0) }
+        HostNetworkingModule.log = { HostLog.error("networking: \($0)") }
+    }
 
     /// The window's title: the app's name.
     nonisolated(unsafe) static var title = ""
@@ -79,6 +90,8 @@ public enum HostApp {
         if ui {
             MainLoop.shared.runsOnMainQueue = true
         }
+
+        configureModules()
 
         // The app's ABI and contracts, checked at every launch: this
         // runner may have changed since the app was installed.
