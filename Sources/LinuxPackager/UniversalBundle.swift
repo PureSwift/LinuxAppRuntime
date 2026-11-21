@@ -23,6 +23,11 @@ public struct UniversalBundle {
     /// (AppRuntime's manifest stage writes both).
     public let localizedDisplayNames: [String: String]
 
+    /// The MIME types of `RTDocumentTypes` (AppRuntime's `documentTypes`),
+    /// in order: what the desktop entry's `MimeType=` can say. Groups such
+    /// as `image/*` and extensions aren't MIME types, and are left out.
+    public let documentMimeTypes: [String]
+
     public init(url: URL) throws(PackagerError) {
         self.url = url.standardizedFileURL
         let plist = url.appendingPathComponent("Info.plist")
@@ -49,9 +54,24 @@ public struct UniversalBundle {
             }
         }
         localizedDisplayNames = names
+        var mimeTypes: [String] = []
+        for documentType in dictionary["RTDocumentTypes"] as? [[String: Any]] ?? [] {
+            for type in documentType["Types"] as? [String] ?? [] where Self.isMimeType(type) && !mimeTypes.contains(type) {
+                mimeTypes.append(type)
+            }
+        }
+        documentMimeTypes = mimeTypes
         displayName = dictionary["CFBundleDisplayName"] as? String
             ?? dictionary["CFBundleName"] as? String
             ?? executable
+    }
+
+    /// `type/subtype`, with no wildcard and nothing a desktop entry's list
+    /// would split.
+    static func isMimeType(_ type: String) -> Bool {
+        let parts = type.split(separator: "/", omittingEmptySubsequences: false)
+        return parts.count == 2 && parts.allSatisfy { !$0.isEmpty && $0 != "*" }
+            && !type.contains(where: { $0 == ";" || $0.isWhitespace || $0 == "\\" })
     }
 
     /// The target's slice, the `libapp.so` the runner loads, if the bundle
