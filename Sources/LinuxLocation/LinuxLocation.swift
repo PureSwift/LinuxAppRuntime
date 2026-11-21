@@ -36,7 +36,7 @@ public enum LinuxLocation: HostModule {
 final class LocationPermission: PermissionProvider {
 
     func status() -> PermissionStatus {
-        switch LocationAuthority.shared.status {
+        switch LocationAuthority.shared.answer {
         case .authorizedAlways, .authorizedWhenInUse:
             return .granted
         case .denied:
@@ -61,7 +61,7 @@ final class LocationPermission: PermissionProvider {
             switch LinuxLocationManager.error(error) {
             case .denied: completion(.denied)
             case .servicesDisabled: completion(.unavailable)
-            default: completion(LocationAuthority.shared.status == .denied ? .denied : .notDetermined)
+            default: completion(LocationAuthority.shared.answer == .denied ? .denied : .notDetermined)
             }
         }
     }
