@@ -179,6 +179,17 @@ let package = Package(
             swiftSettings: host
         ),
 
+        // MARK: - Documents
+
+        // The desktop portal's file chooser on the session bus, over
+        // AppRuntime's HostDocuments.
+        .target(
+            name: "LinuxDocuments",
+            dependencies: ["LinuxHost", "LinuxDBus", runtime("DynamicDocuments"), runtime("RuntimeDocuments"), runtime("DynamicFiles"),
+                           runtime("DynamicRuntime"), runtime("RuntimeHost"), .product(name: "DBus", package: "DBus")],
+            swiftSettings: host
+        ),
+
         // MARK: - Location
 
         // GeoClue 2 on the system bus.
@@ -195,7 +206,7 @@ let package = Package(
         .target(name: "CLinuxHost"),
         .target(
             name: "LinuxHostApp",
-            dependencies: ["LinuxHost", "LinuxUI", "LinuxBluetooth", "LinuxGraphics", "LinuxWebKit", "LinuxCoreModel", "LinuxDevice", "LinuxLocation", "CLinuxHost", runtime("CRuntime"), runtime("RuntimeFormatting"), runtime("RuntimeNetworking"),
+            dependencies: ["LinuxHost", "LinuxUI", "LinuxBluetooth", "LinuxGraphics", "LinuxWebKit", "LinuxCoreModel", "LinuxDevice", "LinuxLocation", "LinuxDocuments", "CLinuxHost", runtime("CRuntime"), runtime("RuntimeFormatting"), runtime("RuntimeNetworking"),
                            runtime("DynamicGraphics"), .product(name: "CacaoSDL", package: "Cacao")],
             swiftSettings: host
         ),
@@ -219,7 +230,7 @@ let package = Package(
         // doesn't build Cacao.
         .target(
             name: "LinuxPackager",
-            dependencies: ["LinuxHost", "LinuxBluetooth", "LinuxGraphics", "LinuxWebKit", "LinuxCoreModel", "LinuxDevice", "LinuxLocation", runtime("RuntimeFormatting"), runtime("RuntimeNetworking"), runtime("DynamicUI"),
+            dependencies: ["LinuxHost", "LinuxBluetooth", "LinuxGraphics", "LinuxWebKit", "LinuxCoreModel", "LinuxDevice", "LinuxLocation", "LinuxDocuments", runtime("RuntimeFormatting"), runtime("RuntimeNetworking"), runtime("DynamicUI"),
                            .product(name: "Crypto", package: "swift-crypto")]
         ),
         .executableTarget(
@@ -247,6 +258,10 @@ let package = Package(
         .testTarget(name: "LinuxDeviceTests", dependencies: ["LinuxDevice", runtime("DynamicDevice")], swiftSettings: host),
         .testTarget(name: "LinuxDBusTests", dependencies: ["LinuxDBus", .product(name: "DBus", package: "DBus")], swiftSettings: host),
         .testTarget(name: "LinuxLocationTests", dependencies: ["LinuxLocation", "LinuxDBus", runtime("DynamicLocation"), .product(name: "DBus", package: "DBus")],
+                    swiftSettings: host),
+        .testTarget(name: "LinuxDocumentsTests", dependencies: ["LinuxDocuments", "LinuxDBus", runtime("DynamicDocuments"), runtime("RuntimeDocuments"),
+                                                            runtime("DynamicFiles"), runtime("RuntimeHost"), runtime("RuntimeNative"),
+                                                            .product(name: "DBus", package: "DBus")],
                     swiftSettings: host),
         .testTarget(name: "LinuxWebKitTests", dependencies: ["LinuxWebKit", runtime("DynamicWebKit")], swiftSettings: host),
         .testTarget(name: "LinuxPackagerTests", dependencies: ["LinuxPackager", "LinuxHostApp", runtime("RuntimeNetworking")]),

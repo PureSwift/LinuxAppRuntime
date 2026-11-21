@@ -17,6 +17,10 @@ public struct DesktopEntry: Equatable {
     /// `Name[locale]`, by POSIX locale (`pt_BR`).
     public var localizedNames: [String: String] = [:]
 
+    /// `MimeType=`: the files the app opens, which a file manager then
+    /// offers it for, passing the file as `%u`.
+    public var mimeTypes: [String] = []
+
     public init(identifier: String, name: String, exec: String, arguments: [String] = [], version: String) {
         self.identifier = identifier
         self.name = name
@@ -38,6 +42,11 @@ public struct DesktopEntry: Equatable {
             "Terminal=false",
             "Categories=Utility;",
             "StartupWMClass=\(Self.escape(identifier))",
+        ]
+        if !mimeTypes.isEmpty {
+            lines.append("MimeType=" + mimeTypes.map { Self.escape($0) + ";" }.joined())
+        }
+        lines += [
             "X-AppRuntime-Identifier=\(Self.escape(identifier))",
             "X-AppRuntime-Version=\(Self.escape(version))",
         ]

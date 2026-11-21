@@ -87,7 +87,10 @@ beside the old one and replaces it whole.
 
 The desktop entry names the app (`CFBundleName`), runs it
 (`Exec=<runner> <identifier> %u`, the runner by its absolute path, with
-`%u` so URLs reach `Application.open`), and matches its windows: the host
+`%u` so URLs reach `Application.open`, and files `Documents`), says what
+it opens (`MimeType=`, the MIME types of the bundle's `RTDocumentTypes`;
+groups such as `image/*` and extensions can't be said there), and matches
+its windows: the host
 sets SDL's app metadata, so the window's Wayland app ID and X11 class are
 the identifier, which `StartupWMClass` repeats. `install` refreshes the
 desktop database when `update-desktop-database` is there.

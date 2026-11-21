@@ -52,7 +52,7 @@ contracts. D-Bus is PureSwift/DBus, in Swift, without libdbus.
 | arm64 and x86_64 Linux with glibc (Debian 13, Ubuntu 24.04+) | armv7, musl |
 | Native slices, loaded by the runner | `App.wasm`, in an engine in the runner; wasm2c for a target a bundle lacks, before it's installed |
 | Wayland and X11 through SDL3; a headless driver for tests | Multiple windows |
-| `Renderer`, `BluetoothCentral` and friends, GL surfaces, web views, files, settings, model stores, date and number formatting, HTTP, the device, location, the built-ins | Motion (iio-sensor-proxy), NFC (neard) |
+| `Renderer`, `BluetoothCentral` and friends, GL surfaces, web views, files, settings, model stores, date and number formatting, HTTP, the device, location, documents, the built-ins | Motion (iio-sensor-proxy), NFC (neard) |
 
 ## 2. Process model
 
@@ -102,8 +102,9 @@ timers for `schedule`.
 | `LinuxDevice` | `Device` from `/etc`, DMI, the device tree, and power and heat in sysfs (§10) |
 | `LinuxDBus` | `Bus`: the system and session buses, for the modules that talk to system services: method calls, properties and signals by match rule, delivered on the main loop (§11.1) |
 | `LinuxLocation` | `LocationManager`, `Location` and `Heading` over GeoClue 2 (§11) |
+| `LinuxDocuments` | `Documents`: AppRuntime's `HostDocuments` with the desktop portal's file chooser, and bookmarks (§12) |
 | `LinuxHostApp` | `main`: reads the app's keys, starts the host, and runs Cacao's SDL loop with one window showing the guest's first renderer |
-| `LinuxPackager`, `linux-app` | The packager (§13, [Packager.md](Packager.md)) |
+| `LinuxPackager`, `linux-app` | The packager (§14, [Packager.md](Packager.md)) |
 
 The package depends on AppRuntime without its `GuestExports` trait, like
 DarwinAppRuntime, so the slice's `rt_dispatch` and `rt_finalize` are the
@@ -530,7 +531,52 @@ their element types.
   connects again, and the rules are added again. Without a bus, calls fail
   with `NoServer`.
 
-## 12. Testing
+## 12. Documents
+
+`LinuxDocuments` is the `Documents` contracts (AppRuntime's
+`Documents.md`): AppRuntime's `HostDocuments`, which turns each pick into a
+grant in `HostFiles`, with a presenter over the desktop portal's file
+chooser (xdg-desktop-portal's `org.freedesktop.portal.FileChooser`) on the
+session bus. The desktop's backend shows the picker, GNOME's, KDE's or
+another, outside the app.
+
+| | The portal |
+|---|---|
+| Open | `OpenFile`, `modal`, `multiple` as asked; the types as one filter, also the current one: a MIME type or group (`image/*`) as a MIME pattern, an extension as a glob (`*.txt`); none, or `*/*`, for any file |
+| Folder | `OpenFile` with `directory`, which file chooser version 3 added; an older one is `unsupported` |
+| Save | `SaveFile` with `current_name`. The portal asks about replacing a file, and answers with where; the host copies the file there, off the main loop, atomically (`HostFiles.copy`), and the saved file is the app's to write to |
+| The answer | A request's `Response`: 0 the `uris` (`file:` URIs; any other is left out), 1 cancelled, 2 `unknown` |
+
+- **Requests** are matched to their answers by a `handle_token` of the
+  host's own, subscribed to before the call, so an answer can't arrive
+  first; a portal from before tokens (0.9) names the request, and its name
+  is used instead. If the bus closes, a waiting picker fails, so the next
+  one can show.
+- **What's picked** is a path the host's process opens: the file's own
+  for a desktop app, the document portal's (`/run/user/<uid>/doc/…`) in a
+  Flatpak. It's writable if `readWrite` was asked for and the user may
+  write it (`access`).
+- **Bookmarks** are the host's: `<container>/Bookmarks`, or
+  `$XDG_DATA_HOME/<id>/Bookmarks`, a property list of random UUIDs, each
+  naming a path, whether it's a folder, and whether it was writable. The
+  same document asked for again has the same bookmark. Resolving one whose
+  file is gone, or is a folder now, is `notFound`; it's writable only while
+  the user still may write it. There's no limit.
+- **Opened with**: a file manager runs the desktop entry's `Exec` with the
+  file as `%u`. For an app that uses `Documents`, a `file:` URI or an
+  absolute path goes to `HostDocuments.open`, which keeps it until the
+  guest listens; anything else is still the `Application` contract's. The
+  packager writes the document types' MIME types as the entry's
+  `MimeType=`; a group or an extension can't be said there.
+- **Without a portal**, or a session bus, every picker fails with
+  `unsupported`, and is logged.
+- **`userFiles`** asks for nothing: the user's pick is the permission.
+- **Not yet**: the picker isn't the app's window's child (`parent_window`
+  is empty): Cacao's window would have to give its X11 ID, or a Wayland
+  handle from xdg-foreign. The titles and the filter's name are English.
+  The photo picker is the file chooser for images and videos.
+
+## 13. Testing
 
 - `LinuxUI`: DarwinUI's tests, on Cacao (§5).
 - `LinuxBluetooth`: the contract against a fake `BlueZBus` that plays
@@ -580,6 +626,17 @@ their element types.
   and declares `network`, and a callback posted from another thread
   reaches the main loop. The contracts themselves are AppRuntime's
   `RuntimeNetworkingTests`, which run on Linux too.
+- `LinuxDocuments`: the pickers against a fake portal that records each
+  call and answers on the main loop: files with their filter, read-only
+  unless asked for writing, no filter for any file, cancelling, an answer
+  that isn't a file, no portal, a portal that names its requests, the bus
+  closing, a token per request; a folder, and an older portal without
+  folders; saving over a file, cancelled, and somewhere that can't be
+  written; bookmarks kept between launches, the same for the same
+  document, forgotten, their file gone or replaced, and where they're
+  kept; the files the app is opened with. The packager accepts the
+  contracts with `userFiles`, and writes `MimeType=`. It hasn't run
+  against a real portal.
 - End to end: AppRuntime's `ExampleUI`, `ExampleGL` and `ExampleModel`
   bundles, their `linux-arm64` `libapp.so` loaded by `linux-app-host` and
   run headless with SDL's `offscreen` driver, each first frame saved with
@@ -592,7 +649,7 @@ their element types.
   `bluetoothd`. Real GeoClue needs a session with an agent, or the app
   allowed in `geoclue.conf`.
 
-## 13. Phases
+## 14. Phases
 
 1. **Host runtime and player**: `LinuxHost`, `LinuxUI`, `LinuxBluetooth`,
    `LinuxHostApp`; `ExampleUI` runs in Docker.
@@ -602,12 +659,12 @@ their element types.
    capabilities (`--system-talk-name=org.bluez` for `bluetooth`).
 3. **More contracts**: Motion (iio-sensor-proxy), NFC (neard).
    Formatting and HTTP are done: AppRuntime's `RuntimeFormatting` and
-   `RuntimeNetworking` (§3), and so are the device (§10) and location
-   (§11), over GeoClue2.
+   `RuntimeNetworking` (§3), and so are the device (§10), location
+   (§11), over GeoClue2, and documents (§12), over the desktop portal.
 4. **Player**: what DarwinUI and Cacao add: Cacao's AT-SPI bridge, input
    replay for end-to-end tests.
 
-## 14. Open questions
+## 15. Open questions
 
 - **Permissions.** Desktop Linux has no prompts for Bluetooth; Flatpak's
   portals cover location and the camera. `Permissions.request` answers from

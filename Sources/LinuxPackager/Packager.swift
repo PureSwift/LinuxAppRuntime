@@ -118,6 +118,7 @@ public struct Packager {
             var entry = DesktopEntry(identifier: identifier, name: bundle.displayName, exec: runner,
                                      arguments: [identifier], version: bundle.info.version)
             entry.localizedNames = bundle.localizedDisplayNames
+            entry.mimeTypes = bundle.documentMimeTypes
             try entry.text.write(to: applications.appendingPathComponent("\(identifier).desktop"), atomically: true, encoding: .utf8)
 
             let icons = root.appendingPathComponent("share/icons/hicolor/256x256/apps")
