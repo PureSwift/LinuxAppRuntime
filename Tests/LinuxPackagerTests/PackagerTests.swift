@@ -70,6 +70,19 @@ import Testing
         #expect(try diagnostics(fixture).map(\.message) == [])
     }
 
+    /// AppRuntime's `HostDocuments`, with the portal's pickers
+    /// (`LinuxDocuments`).
+    @Test func documentsAreImplemented() throws {
+        let fixture = try Fixture(contracts: [
+            ("org.pureswift.ui.Renderer", 1, "contract"),
+            ("org.pureswift.documents.Documents", 1, "contract"),
+            ("org.pureswift.documents.Grant", 1, "contract"),
+            ("org.pureswift.documents.Callback", 1, "callback"),
+            ("org.pureswift.documents.Delegate", 1, "callback"),
+        ], capabilities: ["userFiles"])
+        #expect(try diagnostics(fixture).map(\.message) == [])
+    }
+
     /// AppRuntime's `RuntimeNetworking`, over `FoundationNetworking`.
     @Test func networkingIsImplemented() throws {
         let fixture = try Fixture(contracts: [
@@ -258,6 +271,28 @@ import Testing
         #expect(entry.text.contains("Name=Demo\nName[pt_BR]=Demonstração\nName[zh_CN]=演示\nExec=demo %u\n"))
         let runner = DesktopEntry(identifier: "a.b", name: "Demo", exec: "/usr/bin/linux-app-host", arguments: ["a.b"], version: "1")
         #expect(runner.text.contains("Exec=/usr/bin/linux-app-host a.b %u\n"))
+    }
+
+    /// The document types' MIME types, which a file manager offers the app
+    /// for; groups and extensions can't be said there.
+    @Test func desktopEntriesNameTheDocumentTypes() throws {
+        let fixture = try Fixture(signed: false)
+        let plist = fixture.url.appendingPathComponent("Info.plist")
+        var info = try #require(try PropertyListSerialization.propertyList(from: Data(contentsOf: plist), format: nil) as? [String: Any])
+        info["RTDocumentTypes"] = [
+            ["Name": "Text", "Types": ["text/plain", ".txt", "text/markdown"], "Role": "editor"],
+            ["Name": "Pictures", "Types": ["image/*", "text/plain", "image/png"], "Role": "viewer"],
+        ]
+        try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0).write(to: plist)
+        let bundle = try fixture.bundle
+        #expect(bundle.documentMimeTypes == ["text/plain", "text/markdown", "image/png"])
+        var entry = DesktopEntry(identifier: "a.b", name: "Demo", exec: "demo", version: "1")
+        #expect(!entry.text.contains("MimeType="))
+        entry.mimeTypes = bundle.documentMimeTypes
+        #expect(entry.text.contains("\nMimeType=text/plain;text/markdown;image/png;\n"))
+        for type in ["*/*", "image/*", "text", "/plain", "text/", "a/b/c", "text/plain;x", "text/ plain"] {
+            #expect(!UniversalBundle.isMimeType(type), "\(type)")
+        }
     }
 
     @Test func desktopEntriesEscape() {

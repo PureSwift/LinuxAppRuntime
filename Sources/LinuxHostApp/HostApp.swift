@@ -7,6 +7,7 @@ import Foundation
 import LinuxBluetooth
 import LinuxCoreModel
 import LinuxDevice
+import LinuxDocuments
 import LinuxGraphics
 import LinuxLocation
 import LinuxWebKit
@@ -35,11 +36,12 @@ public enum HostApp {
     /// Every module this host has: the SwiftUI player (DarwinUI, on Cacao),
     /// Bluetooth, GL surfaces and web pages, which the player shows, the
     /// app's files, settings and model stores, AppRuntime's date and number
-    /// formatting and its HTTP client over Swift Foundation, the device, and
-    /// location.
+    /// formatting and its HTTP client over Swift Foundation, the device,
+    /// location, and the user's documents.
     public static let modules: [any HostModule.Type] = [
         DarwinUI.self, LinuxBluetooth.self, LinuxGraphics.self, LinuxWebKit.self, LinuxFiles.self, LinuxDefaults.self,
         LinuxModelStore.self, HostFormattingModule.self, HostNetworkingModule.self, LinuxDeviceModule.self, LinuxLocation.self,
+        LinuxDocuments.self,
     ]
 
     /// Points AppRuntime's modules at this host: networking's callbacks,
@@ -117,8 +119,12 @@ public enum HostApp {
             fail("the app didn't start: \(status)")
         }
         if let url = arguments.open {
+            // A file is a document, for an app that takes them.
+            let documents = info.contractNames.contains(LinuxDocuments.contracts[0].name)
             MainLoop.shared.post {
-                HostApplication.open(url)
+                if !(documents && LinuxDocuments.open(url)) {
+                    HostApplication.open(url)
+                }
             }
         }
         guard ui else {
