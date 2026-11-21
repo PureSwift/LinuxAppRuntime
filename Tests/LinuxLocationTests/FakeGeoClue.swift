@@ -1,4 +1,4 @@
-import DBUS
+import DBus
 import LinuxDBus
 import LinuxHost
 @testable import LinuxLocation
@@ -12,7 +12,7 @@ final class FakeGeoClue: GeoClueBus {
     struct Call: Equatable, CustomStringConvertible {
         var path: String
         var method: String
-        var arguments: [DBusValue]
+        var arguments: [DBusMessageArgument]
 
         var description: String {
             ([method] + arguments.map { $0.text ?? $0.int64Value.map(String.init) ?? "\($0)" }).joined(separator: " ")
@@ -37,13 +37,13 @@ final class FakeGeoClue: GeoClueBus {
     private(set) var calls: [Call] = []
 
     /// Each client's properties.
-    private(set) var clients: [String: [String: DBusValue]] = [:]
+    private(set) var clients: [String: [String: DBusMessageArgument]] = [:]
 
     private(set) var active: Set<String> = []
 
-    private(set) var locations: [String: [String: DBusValue]] = [:]
+    private(set) var locations: [String: [String: DBusMessageArgument]] = [:]
 
-    private var subscribers: [UInt64: (path: String, member: String, handler: ([DBusValue]) -> Void)] = [:]
+    private var subscribers: [UInt64: (path: String, member: String, handler: ([DBusMessageArgument]) -> Void)] = [:]
 
     private var nextClient = 0
 
@@ -71,25 +71,25 @@ final class FakeGeoClue: GeoClueBus {
 
     // MARK: GeoClueBus
 
-    func call(_ path: String, _ interface: String, _ method: String, _ arguments: [DBusValue],
-              reply: @escaping (Result<[DBusValue], BusError>) -> Void) {
+    func call(_ path: String, _ interface: String, _ method: String, _ arguments: [DBusMessageArgument],
+              reply: @escaping (Result<[DBusMessageArgument], BusError>) -> Void) {
         calls.append(Call(path: path, method: method, arguments: arguments))
         let result = answer(path, method, arguments)
         MainLoop.shared.post { reply(result) }
     }
 
-    private func answer(_ path: String, _ method: String, _ arguments: [DBusValue]) -> Result<[DBusValue], BusError> {
+    private func answer(_ path: String, _ method: String, _ arguments: [DBusMessageArgument]) -> Result<[DBusMessageArgument], BusError> {
         guard available else { return .failure(Self.missing) }
         switch method {
         case "CreateClient" where hasCreateClient:
             nextClient += 1
             let client = "/org/freedesktop/GeoClue2/Client/\(nextClient)"
             clients[client] = [:]
-            return .success([.objectPath(client)])
+            return .success([.path(client)])
         case "GetClient":
             let client = "/org/freedesktop/GeoClue2/Client/0"
             clients[client] = clients[client] ?? [:]
-            return .success([.objectPath(client)])
+            return .success([.path(client)])
         case "DeleteClient":
             if let client = arguments.first?.text {
                 clients[client] = nil
@@ -118,14 +118,14 @@ final class FakeGeoClue: GeoClueBus {
         BusError(name: "org.freedesktop.DBus.Error.UnknownObject", message: path)
     }
 
-    func propertyAndWait(_ path: String, _ interface: String, _ name: String) -> Result<DBusValue, BusError> {
+    func propertyAndWait(_ path: String, _ interface: String, _ name: String) -> Result<DBusMessageArgument, BusError> {
         calls.append(Call(path: path, method: "Get", arguments: [.string(name)]))
         guard available else { return .failure(Self.missing) }
         return .success(.uint32(availableAccuracy))
     }
 
-    func properties(_ path: String, _ interface: String, reply: @escaping (Result<[String: DBusValue], BusError>) -> Void) {
-        let result: Result<[String: DBusValue], BusError>
+    func properties(_ path: String, _ interface: String, reply: @escaping (Result<[String: DBusMessageArgument], BusError>) -> Void) {
+        let result: Result<[String: DBusMessageArgument], BusError>
         if !available {
             result = .failure(Self.missing)
         } else if let location = locations[path] {
@@ -136,7 +136,7 @@ final class FakeGeoClue: GeoClueBus {
         MainLoop.shared.post { reply(result) }
     }
 
-    func setProperty(_ path: String, _ interface: String, _ name: String, _ value: DBusValue,
+    func setProperty(_ path: String, _ interface: String, _ name: String, _ value: DBusMessageArgument,
                      reply: @escaping (Result<Void, BusError>) -> Void) {
         calls.append(Call(path: path, method: "Set", arguments: [.string(name), value]))
         let result: Result<Void, BusError>
@@ -153,7 +153,7 @@ final class FakeGeoClue: GeoClueBus {
         MainLoop.shared.post { reply(result) }
     }
 
-    func subscribe(_ path: String, _ interface: String, _ member: String, _ handler: @escaping ([DBusValue]) -> Void) -> BusSubscription {
+    func subscribe(_ path: String, _ interface: String, _ member: String, _ handler: @escaping ([DBusMessageArgument]) -> Void) -> BusSubscription {
         nextSubscriber += 1
         subscribers[nextSubscriber] = (path, member, handler)
         return BusSubscription(id: nextSubscriber)
@@ -185,7 +185,7 @@ final class FakeGeoClue: GeoClueBus {
         ]
         for client in active.sorted() {
             for subscriber in subscribers.values where subscriber.path == client && subscriber.member == "LocationUpdated" {
-                subscriber.handler([.objectPath(old), .objectPath(path)])
+                subscriber.handler([.path(old), .path(path)])
             }
         }
     }
