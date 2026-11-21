@@ -1,5 +1,6 @@
 import Bluetooth
-import DBUS
+import DBus
+import LinuxDBus
 import DynamicBluetooth
 import LinuxHost
 
@@ -129,7 +130,7 @@ public final class LinuxCentral: BluetoothCentral {
     }
 
     /// BlueZ heard a device while discovering.
-    func discovered(_ path: String, _ device: [String: DBusValue]) {
+    func discovered(_ path: String, _ device: [String: DBusMessageArgument]) {
         guard let request = scanRequest else { return }
         if !request.services.isEmpty {
             let advertised = Set(device["UUIDs"]?.strings.map { $0.lowercased() } ?? [])
@@ -224,7 +225,7 @@ public final class LinuxCentral: BluetoothCentral {
     public func retrieveConnectedPeripherals(_ services: [BluetoothUUID]) -> [any BluetoothPeripheral] {
         let wanted = Set(services.map(BlueZMapping.bluezUUID))
         return hub.devicePaths.filter { path in
-            guard let device = hub.properties(path, BlueZInterface.device), device["Connected"]?.boolValue == true else {
+            guard let device = hub.properties(path, BlueZInterface.device), device["Connected"]?.flag == true else {
                 return false
             }
             return wanted.isEmpty || !wanted.isDisjoint(with: device["UUIDs"]?.strings.map { $0.lowercased() } ?? [])
@@ -232,12 +233,12 @@ public final class LinuxCentral: BluetoothCentral {
     }
 
     /// A device's `Connected` or `ServicesResolved` changed.
-    func deviceChanged(_ path: String, _ device: [String: DBusValue], keys: Set<String>) {
-        if connecting[path] != nil, device["Connected"]?.boolValue == true, device["ServicesResolved"]?.boolValue == true {
+    func deviceChanged(_ path: String, _ device: [String: DBusMessageArgument], keys: Set<String>) {
+        if connecting[path] != nil, device["Connected"]?.flag == true, device["ServicesResolved"]?.flag == true {
             finishConnection(path)
             return
         }
-        if keys.contains("Connected"), device["Connected"]?.boolValue != true, let peripheral = connected[path] {
+        if keys.contains("Connected"), device["Connected"]?.flag != true, let peripheral = connected[path] {
             disconnected(path, peripheral)
         }
     }
