@@ -76,12 +76,11 @@ let package = Package(
     dependencies: [
         appRuntime,
         cacao,
-        // D-Bus, which Bluetooth talks to BlueZ over, and Location to
-        // GeoClue; it has no releases.
-        .package(url: "https://github.com/wendylabsinc/dbus.git", revision: "5727296ecaef9655b781f82c7ebde5c9f0d45551"),
-        .package(url: "https://github.com/apple/swift-log.git", from: "1.4.0"),
+        // D-Bus, in Swift without libdbus, which Bluetooth talks to BlueZ
+        // over, and Location to GeoClue; it has no releases.
+        .package(url: "https://github.com/PureSwift/DBus.git", revision: "d34567d64bb553a35e5b263f344c6963a5170ca3"),
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
-        // SHA-256, for bundles' CodeResources; the D-Bus package uses it too.
+        // SHA-256, for bundles' CodeResources.
         .package(url: "https://github.com/apple/swift-crypto.git", "3.0.0"..<"5.0.0"),
         // Model stores: CoreModel's SQLite backend, and the SQLite it's
         // over, which is compiled in on Linux. Both masters, until they're
@@ -118,9 +117,8 @@ let package = Package(
         .target(
             name: "LinuxBluetooth",
             dependencies: [
-                "LinuxHost", runtime("DynamicBluetooth"), runtime("RuntimeNative"),
-                .product(name: "DBUS", package: "dbus"),
-                .product(name: "Logging", package: "swift-log"),
+                "LinuxHost", "LinuxDBus", runtime("DynamicBluetooth"), runtime("RuntimeNative"),
+                .product(name: "DBus", package: "DBus"),
             ],
             swiftSettings: host
         ),
@@ -176,8 +174,7 @@ let package = Package(
             name: "LinuxDBus",
             dependencies: [
                 "LinuxHost",
-                .product(name: "DBUS", package: "dbus"),
-                .product(name: "Logging", package: "swift-log"),
+                .product(name: "DBus", package: "DBus"),
             ],
             swiftSettings: host
         ),
@@ -187,7 +184,7 @@ let package = Package(
         // GeoClue 2 on the system bus.
         .target(
             name: "LinuxLocation",
-            dependencies: ["LinuxHost", "LinuxDBus", runtime("DynamicLocation"), runtime("DynamicRuntime"), .product(name: "DBUS", package: "dbus")],
+            dependencies: ["LinuxHost", "LinuxDBus", runtime("DynamicLocation"), runtime("DynamicRuntime"), .product(name: "DBus", package: "DBus")],
             swiftSettings: host
         ),
 
@@ -248,8 +245,8 @@ let package = Package(
             swiftSettings: host
         ),
         .testTarget(name: "LinuxDeviceTests", dependencies: ["LinuxDevice", runtime("DynamicDevice")], swiftSettings: host),
-        .testTarget(name: "LinuxDBusTests", dependencies: ["LinuxDBus", .product(name: "DBUS", package: "dbus")], swiftSettings: host),
-        .testTarget(name: "LinuxLocationTests", dependencies: ["LinuxLocation", "LinuxDBus", runtime("DynamicLocation"), .product(name: "DBUS", package: "dbus")],
+        .testTarget(name: "LinuxDBusTests", dependencies: ["LinuxDBus", .product(name: "DBus", package: "DBus")], swiftSettings: host),
+        .testTarget(name: "LinuxLocationTests", dependencies: ["LinuxLocation", "LinuxDBus", runtime("DynamicLocation"), .product(name: "DBus", package: "DBus")],
                     swiftSettings: host),
         .testTarget(name: "LinuxWebKitTests", dependencies: ["LinuxWebKit", runtime("DynamicWebKit")], swiftSettings: host),
         .testTarget(name: "LinuxPackagerTests", dependencies: ["LinuxPackager", "LinuxHostApp"]),
