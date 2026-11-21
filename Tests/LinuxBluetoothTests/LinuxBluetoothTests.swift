@@ -1,5 +1,6 @@
 import Bluetooth
-import DBUS
+import DBus
+import LinuxDBus
 import DynamicBluetooth
 import LinuxHost
 import Testing
@@ -64,21 +65,21 @@ import Testing
         let (central, log, _, bus) = central()
         central.scan(services: [.bit16(0x180D)], allowDuplicates: false, mode: 0)
         #expect(bus.methods(on: FakeBus.adapter) == ["SetDiscoveryFilter", "StartDiscovery"])
-        let filter = try #require(bus.calls.first?.arguments.first?.properties())
+        let filter = try #require(bus.calls.first?.arguments.first?.entries)
         #expect(filter["UUIDs"]?.strings == [FakeBus.heartRate])
-        #expect(filter["Transport"]?.stringValue == "le")
+        #expect(filter["Transport"]?.text == "le")
         #expect(central.isScanning())
 
-        let advertised: [String: DBusValue] = [
+        let advertised: [String: DBusMessageArgument] = [
             "RSSI": .int16(-60),
-            "ManufacturerData": .dictionary([.uint16(0x004C): .variant(DBusVariant(.byteArray([1, 2])))]),
+            "ManufacturerData": manufacturerData([(0x004C, [1, 2])]),
             "TxPower": .int16(4),
         ]
         bus.change(FakeBus.device, BlueZInterface.device, advertised)
         bus.change(FakeBus.device, BlueZInterface.device, ["RSSI": .int16(-58)])
         // Another device without the service.
         bus.emit(.added(path: FakeBus.adapter + "/dev_11", interfaces: [BlueZInterface.device: [
-            "Address": .string("11:11:11:11:11:11"), "RSSI": .int16(-40), "UUIDs": .array([]),
+            "Address": .string("11:11:11:11:11:11"), "RSSI": .int16(-40), "UUIDs": .stringArray([]),
         ]]))
         #expect(log.events == ["state poweredOn", "discover AA:BB:CC:DD:EE:FF -60"])
         let advertisement = try #require(log.discovered.first?.advertisement)
@@ -208,7 +209,7 @@ import Testing
         bus.responder = { call in
             switch call.method {
             case "ReadValue": .success([.byteArray([0x06, 0x48])])
-            case "WriteValue" where call.arguments.last?.properties()["type"]?.stringValue == "request":
+            case "WriteValue" where call.arguments.last?.entries["type"]?.text == "request":
                 .failure(BlueZError(name: "org.bluez.Error.NotPermitted"))
             default: .success([])
             }
@@ -232,7 +233,7 @@ import Testing
         #expect(characteristic.value() == [0x06, 0x50])
         let writes = bus.calls.filter { $0.method == "WriteValue" }
         #expect(writes.map { $0.arguments.first?.bytes } == [[1], [2]])
-        #expect(writes.last?.arguments.last?.properties()["type"]?.stringValue == "command")
+        #expect(writes.last?.arguments.last?.entries["type"]?.text == "command")
     }
 
     @Test func operationsWhileDisconnectedFail() {
@@ -255,9 +256,13 @@ import Testing
         #expect(BlueZMapping.errorCode(BlueZError(name: "org.bluez.Error.NotConnected")) == BluetoothError.notConnected.rawValue)
         #expect(BlueZMapping.errorCode(BlueZError(name: "org.bluez.Error.NotSupported")) == BluetoothError.operationNotSupported.rawValue)
         #expect(BlueZMapping.errorCode(BlueZError(name: "org.bluez.Error.Failed"), connecting: true) == BluetoothError.connectionFailed.rawValue)
-        #expect(BlueZMapping.manufacturerData(.dictionary([
-            .uint16(0x0102): .variant(DBusVariant(.byteArray([9]))),
-            .uint16(0x0001): .variant(DBusVariant(.byteArray([7]))),
-        ])) == [0x01, 0x00, 7], "the lowest company identifier first")
+        #expect(BlueZMapping.manufacturerData(manufacturerData([(0x0102, [9]), (0x0001, [7])])) == [0x01, 0x00, 7],
+                "the lowest company identifier first")
     }
+}
+
+/// `Device1.ManufacturerData` (`a{qv}`), in this order.
+func manufacturerData(_ entries: [(company: UInt16, data: [UInt8])]) -> DBusMessageArgument {
+    let entries = entries.map { DBusMessageArgument.Dictionary.Entry(key: .uint16($0.company), value: .variant(.init(.byteArray($0.data)))) }
+    return .dictionary(DBusMessageArgument.Dictionary(keyType: .uint16, valueType: .variant, entries)!)
 }

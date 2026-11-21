@@ -1,4 +1,5 @@
-import DBUS
+import DBus
+import LinuxDBus
 import DynamicBluetooth
 import LinuxHost
 
@@ -79,7 +80,7 @@ public final class BlueZHub {
         objects.keys.filter { objects[$0]?[BlueZInterface.adapter] != nil }.sorted().first
     }
 
-    var adapter: [String: DBusValue]? {
+    var adapter: [String: DBusMessageArgument]? {
         adapterPath.flatMap { objects[$0]?[BlueZInterface.adapter] }
     }
 
@@ -92,7 +93,7 @@ public final class BlueZHub {
             return error.isAccessDenied ? .unauthorized : .unsupported
         case .ready:
             guard let adapter else { return .unsupported }
-            return adapter["Powered"]?.boolValue == true ? .poweredOn : .poweredOff
+            return adapter["Powered"]?.flag == true ? .poweredOn : .poweredOff
         }
     }
 
@@ -113,14 +114,14 @@ public final class BlueZHub {
         _ path: String,
         _ interface: String,
         _ method: String,
-        _ arguments: [DBusValue] = [],
+        _ arguments: [DBusMessageArgument] = [],
         signature: String? = nil,
-        reply: @escaping (Result<[DBusValue], BlueZError>) -> Void = { _ in }
+        reply: @escaping (Result<[DBusMessageArgument], BlueZError>) -> Void = { _ in }
     ) {
         bus.call(path, interface, method, arguments, signature: signature, reply: reply)
     }
 
-    func properties(_ path: String, _ interface: String) -> [String: DBusValue]? {
+    func properties(_ path: String, _ interface: String) -> [String: DBusMessageArgument]? {
         objects[path]?[interface]
     }
 
@@ -128,7 +129,7 @@ public final class BlueZHub {
     /// property (`Device`, `Service`, `Characteristic`), in path order.
     func children(of parent: String, interface: String, parentKey: String) -> [String] {
         objects.compactMap { path, interfaces in
-            interfaces[interface]?[parentKey]?.stringValue == parent ? path : nil
+            interfaces[interface]?[parentKey]?.text == parent ? path : nil
         }.sorted()
     }
 
@@ -168,8 +169,8 @@ public final class BlueZHub {
     func devicePath(address: String) -> String? {
         objects.keys.sorted().first { path in
             guard let device = objects[path]?[BlueZInterface.device] else { return false }
-            return device["Address"]?.stringValue?.uppercased() == address.uppercased()
-                && (adapterPath == nil || device["Adapter"]?.stringValue == adapterPath)
+            return device["Address"]?.text?.uppercased() == address.uppercased()
+                && (adapterPath == nil || device["Adapter"]?.text == adapterPath)
         }
     }
 
@@ -207,14 +208,14 @@ public final class BlueZHub {
         let filter = DiscoveryFilter(uuids: uuids, duplicates: requests.contains { $0.allowDuplicates })
         guard filter != discoveryFilter || !discovering else { return }
         discoveryFilter = filter
-        var options: [String: DBusValue] = [
+        var options: [String: DBusMessageArgument] = [
             "Transport": .string("le"),
             "DuplicateData": .boolean(filter.duplicates),
         ]
         if !uuids.isEmpty {
-            options["UUIDs"] = .array(uuids.map { .string($0) })
+            options["UUIDs"] = .stringArray(uuids)
         }
-        call(adapterPath, BlueZInterface.adapter, "SetDiscoveryFilter", [.options(options)], signature: "a{sv}")
+        call(adapterPath, BlueZInterface.adapter, "SetDiscoveryFilter", [.vardict(options)], signature: "a{sv}")
         if !discovering {
             discovering = true
             call(adapterPath, BlueZInterface.adapter, "StartDiscovery") { [weak self] result in
@@ -289,12 +290,12 @@ public final class BlueZHub {
             case BlueZInterface.adapter:
                 if changed["Powered"] != nil {
                     stateChanged()
-                    if changed["Powered"]?.boolValue == true {
+                    if changed["Powered"]?.flag == true {
                         discovering = false
                         updateDiscovery()
                     }
                 }
-                if changed["Discovering"]?.boolValue == false, discovering {
+                if changed["Discovering"]?.flag == false, discovering {
                     // Another process, or BlueZ, stopped it: start again.
                     discovering = false
                     discoveryFilter = nil
@@ -331,7 +332,7 @@ public final class BlueZHub {
         }
     }
 
-    private func deviceChanged(_ path: String, _ device: [String: DBusValue], keys: Set<String>) {
+    private func deviceChanged(_ path: String, _ device: [String: DBusMessageArgument], keys: Set<String>) {
         if !keys.isDisjoint(with: ["RSSI", "ManufacturerData", "ServiceData", "UUIDs", "TxPower"]), device["RSSI"] != nil {
             for central in liveCentrals where central.scanRequest != nil {
                 central.discovered(path, device)

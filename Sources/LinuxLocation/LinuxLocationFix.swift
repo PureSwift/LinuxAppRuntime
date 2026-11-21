@@ -1,4 +1,4 @@
-import DBUS
+import DBus
 import DynamicLocation
 import Foundation
 import LinuxDBus
@@ -43,7 +43,7 @@ public final class LinuxLocationFix: Location {
 
     /// From `org.freedesktop.GeoClue2.Location`'s properties; `nil` without
     /// a coordinate. A missing `Timestamp` is now.
-    public convenience init?(_ properties: [String: DBusValue], now: Date = Date()) {
+    public convenience init?(_ properties: [String: DBusMessageArgument], now: Date = Date()) {
         guard let latitude = properties["Latitude"]?.doubleValue,
               let longitude = properties["Longitude"]?.doubleValue else {
             return nil

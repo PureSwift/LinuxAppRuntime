@@ -1,4 +1,4 @@
-import DBUS
+import DBus
 import Foundation
 import LinuxHost
 import Testing
@@ -17,7 +17,7 @@ final class Daemon {
 
     static let executable = ["/usr/bin/dbus-daemon", "/bin/dbus-daemon"].first { FileManager.default.isExecutableFile(atPath: $0) }
 
-    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("bus-\(UUID().uuidString)").path
+    let directory: String
 
     let process = Process()
 
@@ -25,13 +25,21 @@ final class Daemon {
         "unix:path=\(directory)/bus"
     }
 
-    init() throws {
-        try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+    /// In `directory`, if one's given: another daemon's, once it's gone.
+    init(directory: String? = nil) throws {
+        self.directory = directory ?? FileManager.default.temporaryDirectory.appendingPathComponent("bus-\(UUID().uuidString)").path
+        try FileManager.default.createDirectory(atPath: self.directory, withIntermediateDirectories: true)
+        try? FileManager.default.removeItem(atPath: self.directory + "/bus")
         process.executableURL = URL(fileURLWithPath: Self.executable!)
         process.arguments = ["--session", "--nofork", "--nopidfile", "--address=\(address)"]
+        // Not the runner's: a daemon outliving a crashed runner would keep
+        // its output open, and `swift test` waiting.
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
         try process.run()
         let deadline = Date().addingTimeInterval(10)
-        while !FileManager.default.fileExists(atPath: directory + "/bus"), Date() < deadline {
+        while !FileManager.default.fileExists(atPath: self.directory + "/bus"), Date() < deadline {
             usleep(10_000)
         }
     }
@@ -86,17 +94,36 @@ final class Daemon {
     }
 
     @Test func values() {
-        let variant = DBusValue.variant(DBusVariant(.variant(DBusVariant(.double(1.5)))))
+        let variant = DBusMessageArgument.variant(.init(.variant(.init(.double(1.5)))))
         #expect(variant.contents == .double(1.5))
         #expect(variant.doubleValue == 1.5)
-        #expect(DBusValue.uint32(7).doubleValue == 7)
-        #expect(DBusValue.uint64(.max).int64Value == nil)
-        #expect(DBusValue.objectPath("/a").text == "/a")
-        #expect(DBusValue.boolean(true).flag == true)
-        #expect(DBusValue.structure([.uint64(1), .uint64(2)]).fields == [.uint64(1), .uint64(2)])
-        let dictionary = DBusValue.vardict(["Latitude": .double(1), "Name": .string("x")])
+        #expect(DBusMessageArgument.uint32(7).doubleValue == 7)
+        #expect(DBusMessageArgument.uint64(.max).int64Value == nil)
+        #expect(DBusMessageArgument.path("/a").text == "/a")
+        #expect(DBusMessageArgument.boolean(true).flag == true)
+        #expect(DBusMessageArgument.structure([.uint64(1), .uint64(2)]).fields == [.uint64(1), .uint64(2)])
+        #expect(DBusMessageArgument.stringArray(["a", "b"]).elements == [.string("a"), .string("b")])
+        let dictionary = DBusMessageArgument.vardict(["Latitude": .double(1), "Name": .string("x")])
         #expect(dictionary.entries == ["Latitude": .double(1), "Name": .string("x")])
-        #expect(DBusValue.string("x").entries.isEmpty)
+        #expect(DBusMessageArgument.string("x").entries.isEmpty)
+        // Typed, though empty.
+        #expect(String([DBusMessageArgument.vardict([:]), .stringArray([]), dictionary].map(\.type)) == "a{sv}asa{sv}")
+    }
+
+    @Test func signatures() throws {
+        let message = try Bus.message("org.example", "/a", "org.example.I", "M", [.string("x"), .vardict([:])], signature: "sa{sv}").get()
+        #expect(message.arguments.count == 2)
+        #expect(message.destination?.rawValue == "org.example")
+        guard case .failure(let error) = Bus.message("org.example", "/a", "org.example.I", "M", [.string("x")], signature: "u") else {
+            Issue.record("the wrong signature was taken")
+            return
+        }
+        #expect(error.name == "org.freedesktop.DBus.Error.InvalidSignature")
+        guard case .failure(let invalid) = Bus.message("org.example", "a", "org.example.I", "M", [], signature: nil) else {
+            Issue.record("an invalid path was taken")
+            return
+        }
+        #expect(invalid.name == "org.freedesktop.DBus.Error.InvalidArgs")
     }
 
     // MARK: A bus
@@ -104,10 +131,13 @@ final class Daemon {
     @Test func noBusFailsOnTheMainLoop() {
         let loop = MainLoop()
         let bus = Bus(.address("unix:path=/nonexistent/linux-app-bus"), loop: loop)
-        var result: Result<[DBusValue], BusError>?
+        var result: Result<[DBusMessageArgument], BusError>?
+        var disconnected: [BusSignal] = []
+        bus.subscribe(.disconnected) { disconnected.append($0) }
         bus.call("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "GetId") { result = $0 }
         #expect(result == nil, "never inside the call")
-        run(loop) { result != nil }
+        run(loop) { result != nil && !disconnected.isEmpty }
+        #expect(disconnected.count == 1, "the local signal, for the connection that couldn't be made")
         guard case .failure(let error)? = result else {
             Issue.record("expected a failure, got \(String(describing: result))")
             return
@@ -141,7 +171,7 @@ final class Daemon {
         run(loop) { names != nil }
         #expect(names?.contains("org.freedesktop.DBus") == true)
 
-        var all: [String: DBusValue]?
+        var all: [String: DBusMessageArgument]?
         bus.properties("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus") { all = try? $0.get() }
         run(loop) { all != nil }
         #expect(all?["Features"] != nil)
@@ -172,5 +202,36 @@ final class Daemon {
         #expect(signals.first?.body.last?.text?.hasPrefix(":") == true)
         #expect(unrelated == 0)
         bus.unsubscribe(subscription)
+    }
+
+    @Test(.enabled(if: Daemon.executable != nil, "needs dbus-daemon"))
+    func reconnectsWithItsMatchRules() throws {
+        var daemon: Daemon? = try Daemon()
+        let directory = daemon!.directory
+        let loop = MainLoop()
+        let bus = Bus(.address(daemon!.address), loop: loop)
+        var signals: [BusSignal] = []
+        bus.subscribe(MatchRule(sender: "org.freedesktop.DBus", interface: "org.freedesktop.DBus", member: "NameOwnerChanged",
+                                arg0: "org.example.LinuxDBusTests.Again")) { signals.append($0) }
+        var disconnected = 0
+        bus.subscribe(.disconnected) { _ in disconnected += 1 }
+        _ = try bus.callAndWait("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "GetId").get()
+
+        // The daemon goes, and another comes at the same address.
+        daemon = nil
+        run(loop) { disconnected > 0 }
+        #expect(disconnected == 1)
+        let again = try Daemon(directory: directory)
+        defer { withExtendedLifetime(again) { } }
+
+        // The next request connects again, and the rule is added again.
+        _ = try bus.callAndWait("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "GetId").get()
+        run(loop, for: 0.2) { false }
+        _ = bus.callAndWait("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "GetId")
+        let other = Bus(.address(again.address), loop: loop)
+        _ = try other.callAndWait("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "RequestName",
+                                  [.string("org.example.LinuxDBusTests.Again"), .uint32(0)]).get()
+        run(loop) { !signals.isEmpty }
+        #expect(signals.first?.body.first?.text == "org.example.LinuxDBusTests.Again")
     }
 }

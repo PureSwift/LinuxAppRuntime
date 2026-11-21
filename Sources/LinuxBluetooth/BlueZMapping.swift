@@ -1,5 +1,6 @@
 import Bluetooth
-import DBUS
+import DBus
+import LinuxDBus
 import DynamicBluetooth
 import DynamicRuntime
 
@@ -67,8 +68,8 @@ public enum BlueZMapping {
 
     /// `Device1.ManufacturerData` (`a{qv}`): the first entry, company
     /// identifier first, little-endian, as in the advertisement.
-    public static func manufacturerData(_ value: DBusValue?) -> [UInt8]? {
-        guard case .dictionary(let entries)? = value?.unwrapped else { return nil }
+    public static func manufacturerData(_ value: DBusMessageArgument?) -> [UInt8]? {
+        guard let entries = value?.pairs else { return nil }
         guard let (company, data) = entries.compactMap({ key, value -> (Int, [UInt8])? in
             guard let company = key.intValue, let bytes = value.bytes else { return nil }
             return (company, bytes)
@@ -77,10 +78,10 @@ public enum BlueZMapping {
     }
 
     /// `Device1.ServiceData` (`a{sv}`).
-    public static func serviceData(_ value: DBusValue?) -> [(uuid: String, data: [UInt8])] {
-        guard case .dictionary(let entries)? = value?.unwrapped else { return [] }
+    public static func serviceData(_ value: DBusMessageArgument?) -> [(uuid: String, data: [UInt8])] {
+        guard let entries = value?.pairs else { return [] }
         return entries.compactMap { key, value in
-            guard let uuid = key.stringValue, let bytes = value.bytes else { return nil }
+            guard let uuid = key.text, let bytes = value.bytes else { return nil }
             return (uuid, bytes)
         }.sorted { $0.uuid < $1.uuid }
     }

@@ -1,35 +1,36 @@
-import DBUS
+import DBus
 import Foundation
-import LinuxHost
-import Logging
 
-#if canImport(Glibc)
-import Glibc
-#elseif canImport(Darwin)
-import Darwin
-#endif
-
-/// One connection to a bus, on D-Bus's own threads (SwiftNIO's): a writer
-/// task that sends requests in the order they were made, and a read loop
-/// that hands replies to their callers and signals to `handler`.
+/// One connection to a bus, a PureSwift/DBus `DBusConnection`, on Swift's
+/// own threads: a writer task that starts requests in the order they were
+/// made, and the connection's read loop, which answers them and hands
+/// signals to `handler`.
 ///
 /// It connects on the first request and, once closed, again on the next.
-/// Callbacks run on D-Bus's threads; `Bus` posts them to the main loop.
+/// Callbacks run on Swift's threads; `Bus` posts them to the main loop.
 final class BusLink: @unchecked Sendable {
 
-    typealias Completion = @Sendable (Result<DBusMessage, BusError>) -> Void
+    typealias Completion = @Sendable (Result<[DBusMessageArgument], BusError>) -> Void
 
     enum Event: Sendable {
-        /// Said `Hello`; requests made while connecting are on their way.
+        /// Connected and said `Hello`; requests made while connecting are
+        /// on their way.
         case connected
         case signal(BusSignal)
         /// The connection closed, or couldn't be made.
         case closed(BusError)
     }
 
-    private struct Outgoing: @unchecked Sendable {
-        let request: DBusRequest
+    private struct Outgoing: Sendable {
+        let message: DBusMessage
         let completion: Completion
+
+        /// A request to the bus itself (`AddMatch`, `RemoveMatch`): the
+        /// next isn't started until it's answered, so a match rule is in
+        /// place before what was asked after it.
+        var isBarrier: Bool {
+            message.destination == DBusWellKnown.busName
+        }
     }
 
     private enum Status {
@@ -38,7 +39,7 @@ final class BusLink: @unchecked Sendable {
         case connected(AsyncStream<Outgoing>.Continuation)
     }
 
-    private let address: @Sendable () throws -> DBusAddress
+    private let connect: @Sendable () async throws -> DBusConnection
 
     /// Set once, before the first request.
     var handler: @Sendable (Event) -> Void = { _ in }
@@ -50,28 +51,16 @@ final class BusLink: @unchecked Sendable {
     /// Requests made while connecting.
     private var waiting: [Outgoing] = []
 
-    /// Callers waiting for replies, by the request's serial.
-    private var pending: [UInt32: Completion] = [:]
-
-    /// Replies that came before their caller was waiting.
-    private var early: [UInt32: DBusMessage] = [:]
-
-    init(address: @escaping @Sendable () throws -> DBusAddress) {
-        self.address = address
+    init(connect: @escaping @Sendable () async throws -> DBusConnection) {
+        self.connect = connect
     }
-
-    private static let logger: Logger = {
-        var logger = Logger(label: "linux-app-host.dbus")
-        logger.logLevel = HostLog.verbose ? .debug : .critical
-        return logger
-    }()
 
     // MARK: Requests
 
-    /// Sends `request`; `completion` gets its reply or error, on D-Bus's
-    /// threads.
-    func send(_ request: DBusRequest, _ completion: @escaping Completion) {
-        let item = Outgoing(request: request, completion: completion)
+    /// Sends `message`; `completion` gets its reply's values or its error,
+    /// on Swift's threads.
+    func send(_ message: DBusMessage, _ completion: @escaping Completion) {
+        let item = Outgoing(message: message, completion: completion)
         lock.lock()
         switch status {
         case .connected(let outgoing):
@@ -95,53 +84,55 @@ final class BusLink: @unchecked Sendable {
 
     private func start() {
         Task.detached { [self] in
-            let connected = ConnectedFlag()
-            var failure = BusError.disconnected
+            let connection: DBusConnection
             do {
-                let address = try self.address()
-                try await DBusClient.withConnectionPair(to: address, auth: .external(userID: String(getuid())), logger: Self.logger) { replies, send in
-                    try await self.run(&replies, send, connected: connected)
-                }
-            } catch let error as BusError {
-                failure = error
+                connection = try await self.connect()
             } catch {
-                failure = connected.value ? .disconnected : .noServer(String(describing: error))
+                self.closed(.noServer(String(describing: error)))
+                return
             }
-            self.closed(failure)
+            await self.run(connection)
         }
     }
 
-    private final class ConnectedFlag: @unchecked Sendable {
-        var value = false
-    }
+    private func run(_ connection: DBusConnection) async {
+        let handler = self.handler
+        await connection.setMessageHandler { message in
+            guard message.type == .signal, let path = message.path, let interface = message.interface,
+                  let member = message.member else { return }
+            handler(.signal(BusSignal(sender: message.sender?.rawValue, path: path.rawValue, interface: interface.rawValue,
+                                      member: member.rawValue, body: message.arguments)))
+        }
+        // The connection says when it closes only by ending its streams of
+        // signals: this one's, for a signal that never comes over the wire.
+        let closing: AsyncStream<DBusMessage>
+        do {
+            closing = try await connection.signals(matching: DBusMatchRule(
+                type: .signal, interface: DBusInterface(rawValue: Bus.local)!, member: DBusMember(rawValue: "Disconnected")!,
+                path: DBusObjectPath(rawValue: Bus.localPath)!))
+        } catch {
+            await connection.close()
+            closed(Self.error(error, connected: false))
+            return
+        }
 
-    private func run(_ replies: inout DBusClient.Replies, _ send: DBusClient.Send, connected: ConnectedFlag) async throws {
         let (outgoing, continuation) = AsyncStream.makeStream(of: Outgoing.self)
         let writer = Task {
             for await item in outgoing {
-                do {
-                    let serial = try await send.send(item.request)
-                    self.expect(serial, item.completion)
-                } catch {
-                    item.completion(.failure(BusError(name: "org.freedesktop.DBus.Error.Failed", message: String(describing: error))))
+                if item.isBarrier {
+                    item.completion(await Self.send(item.message, on: connection))
+                } else {
+                    await connection.begin(item.message, item.completion)
                 }
             }
         }
-        defer {
-            continuation.finish()
-            writer.cancel()
-        }
-        // `Hello` first, then what was asked for while connecting, in order.
-        continuation.yield(Outgoing(request: .createMethodCall(
-            destination: "org.freedesktop.DBus", path: "/org/freedesktop/DBus",
-            interface: "org.freedesktop.DBus", method: "Hello"), completion: { _ in }))
         open(continuation)
-        connected.value = true
         handler(.connected)
 
-        while let message = try await replies.next() {
-            receive(message)
-        }
+        for await _ in closing { }
+        continuation.finish()
+        await writer.value
+        closed(.disconnected)
     }
 
     /// Sends what waited, and from now on sends at once.
@@ -155,57 +146,50 @@ final class BusLink: @unchecked Sendable {
         lock.unlock()
     }
 
-    private func expect(_ serial: UInt32, _ completion: @escaping Completion) {
-        lock.lock()
-        if let message = early.removeValue(forKey: serial) {
-            lock.unlock()
-            completion(Self.result(message))
-        } else {
-            pending[serial] = completion
-            lock.unlock()
-        }
-    }
-
-    private func receive(_ message: DBusMessage) {
-        if let serial = message.replyTo {
-            lock.lock()
-            if let completion = pending.removeValue(forKey: serial) {
-                lock.unlock()
-                completion(Self.result(message))
-            } else {
-                early[serial] = message
-                lock.unlock()
-            }
-        } else if case .signal = message.messageType, let path = message.path,
-                  let interface = message.interface, let member = message.member {
-            handler(.signal(BusSignal(sender: message.sender, path: path, interface: interface, member: member, body: message.body)))
-        }
-    }
-
     private func closed(_ failure: BusError) {
         lock.lock()
         status = .idle
-        let stranded = Array(pending.values)
-        let unsent = waiting
-        pending = [:]
-        early = [:]
+        let stranded = waiting
         waiting = []
         lock.unlock()
-        for completion in stranded {
-            completion(.failure(.disconnected))
-        }
-        for item in unsent {
+        for item in stranded {
             item.completion(.failure(failure))
         }
         handler(.closed(failure))
     }
 
-    /// A reply's values, or its error.
-    static func result(_ message: DBusMessage) -> Result<DBusMessage, BusError> {
-        guard case .error = message.messageType else {
-            return .success(message)
+    static func send(_ message: DBusMessage, on connection: DBusConnection) async -> Result<[DBusMessageArgument], BusError> {
+        do {
+            return .success(try await connection.send(message).arguments)
+        } catch {
+            return .failure(Self.error(error, connected: await connection.isConnected))
         }
-        let name = message.headerFields.first { $0.code == .errorName }.flatMap { $0.variant.value.text }
-        return .failure(BusError(name: name ?? "org.freedesktop.DBus.Error.Failed", message: message.body.first?.text ?? ""))
+    }
+
+    /// A failed request's error: the one it was answered with, or
+    /// `disconnected` if the connection closed under it.
+    static func error(_ error: any Error, connected: Bool) -> BusError {
+        if let error = error as? DBusError {
+            return error.name == .disconnected ? .disconnected : BusError(name: error.name.rawValue, message: error.message)
+        }
+        return connected ? BusError(name: "org.freedesktop.DBus.Error.Failed", message: String(describing: error)) : .disconnected
+    }
+}
+
+extension DBusConnection {
+
+    /// Starts sending `message` on the connection's own executor, so
+    /// requests begun in order are given serials, and written, in order;
+    /// `completion` gets the reply.
+    func begin(_ message: DBusMessage, _ completion: @escaping BusLink.Completion) {
+        Task {
+            // `send` is the connection's, so this doesn't leave its
+            // executor before the message has its serial.
+            do {
+                completion(.success(try await self.send(message).arguments))
+            } catch {
+                completion(.failure(BusLink.error(error, connected: self.isConnected)))
+            }
+        }
     }
 }

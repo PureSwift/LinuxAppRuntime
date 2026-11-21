@@ -1,5 +1,6 @@
 import Bluetooth
-import DBUS
+import DBus
+import LinuxDBus
 import DynamicBluetooth
 import LinuxHost
 @testable import LinuxBluetooth
@@ -12,13 +13,13 @@ final class FakeBus: BlueZBus {
         var path: String
         var interface: String
         var method: String
-        var arguments: [DBusValue]
+        var arguments: [DBusMessageArgument]
     }
 
     var objects: [String: BlueZInterfaces]
 
     /// Answers each call; `nil` holds the reply back.
-    var responder: (Call) -> Result<[DBusValue], BlueZError>? = { _ in .success([]) }
+    var responder: (Call) -> Result<[DBusMessageArgument], BlueZError>? = { _ in .success([]) }
 
     private(set) var calls: [Call] = []
 
@@ -34,8 +35,8 @@ final class FakeBus: BlueZBus {
         MainLoop.shared.post { handler(.connected(objects)) }
     }
 
-    func call(_ path: String, _ interface: String, _ method: String, _ arguments: [DBusValue],
-              signature: String?, reply: @escaping (Result<[DBusValue], BlueZError>) -> Void) {
+    func call(_ path: String, _ interface: String, _ method: String, _ arguments: [DBusMessageArgument],
+              signature: String?, reply: @escaping (Result<[DBusMessageArgument], BlueZError>) -> Void) {
         let call = Call(path: path, interface: interface, method: method, arguments: arguments)
         calls.append(call)
         if let result = responder(call) {
@@ -48,7 +49,7 @@ final class FakeBus: BlueZBus {
     }
 
     /// A `PropertiesChanged` signal.
-    func change(_ path: String, _ interface: String, _ properties: [String: DBusValue]) {
+    func change(_ path: String, _ interface: String, _ properties: [String: DBusMessageArgument]) {
         handler?(.changed(path: path, interface: interface, changed: properties, invalidated: []))
     }
 
@@ -70,21 +71,21 @@ final class FakeBus: BlueZBus {
         adapter: [BlueZInterface.adapter: ["Powered": .boolean(true), "Address": .string("00:11:22:33:44:55")]],
         device: [BlueZInterface.device: [
             "Address": .string("AA:BB:CC:DD:EE:FF"),
-            "Adapter": .objectPath(adapter),
+            "Adapter": .path(adapter),
             "Name": .string("Sensor"),
             "Connected": .boolean(false),
             "ServicesResolved": .boolean(false),
-            "UUIDs": .array([.string(heartRate)]),
+            "UUIDs": .stringArray([heartRate]),
         ]],
         service: [BlueZInterface.service: [
-            "UUID": .string(heartRate), "Device": .objectPath(device), "Primary": .boolean(true),
+            "UUID": .string(heartRate), "Device": .path(device), "Primary": .boolean(true),
         ]],
         characteristic: [BlueZInterface.characteristic: [
-            "UUID": .string(measurement), "Service": .objectPath(service),
-            "Flags": .array([.string("read"), .string("notify"), .string("write")]), "MTU": .uint16(185),
+            "UUID": .string(measurement), "Service": .path(service),
+            "Flags": .stringArray(["read", "notify", "write"]), "MTU": .uint16(185),
         ]],
         descriptor: [BlueZInterface.descriptor: [
-            "UUID": .string("00002902-0000-1000-8000-00805f9b34fb"), "Characteristic": .objectPath(characteristic),
+            "UUID": .string("00002902-0000-1000-8000-00805f9b34fb"), "Characteristic": .path(characteristic),
         ]],
     ]
 }

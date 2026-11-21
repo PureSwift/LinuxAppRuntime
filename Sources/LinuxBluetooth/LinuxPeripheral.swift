@@ -1,5 +1,6 @@
 import Bluetooth
-import DBUS
+import DBus
+import LinuxDBus
 import DynamicBluetooth
 import LinuxHost
 
@@ -46,27 +47,27 @@ public final class LinuxPeripheral: BluetoothPeripheral {
         self.hub = hub
     }
 
-    var device: [String: DBusValue] {
+    var device: [String: DBusMessageArgument] {
         hub.properties(path, BlueZInterface.device) ?? [:]
     }
 
     var isConnected: Bool {
-        device["Connected"]?.boolValue == true
+        device["Connected"]?.flag == true
     }
 
     /// Connected, with its services resolved.
     var isReady: Bool {
-        isConnected && device["ServicesResolved"]?.boolValue == true
+        isConnected && device["ServicesResolved"]?.flag == true
     }
 
     // MARK: Peripheral
 
     public func identifier() -> String {
-        device["Address"]?.stringValue ?? path
+        device["Address"]?.text ?? path
     }
 
     public func name() -> String? {
-        device["Name"]?.stringValue
+        device["Name"]?.text
     }
 
     public func state() -> Int32 {
@@ -91,7 +92,7 @@ public final class LinuxPeripheral: BluetoothPeripheral {
             let report = { [self] in
                 let paths = hub.children(of: path, interface: BlueZInterface.service, parentKey: "Device")
                 discovered = paths.filter { path in
-                    wanted.isEmpty || wanted.contains(hub.properties(path, BlueZInterface.service)?["UUID"]?.stringValue?.lowercased() ?? "")
+                    wanted.isEmpty || wanted.contains(hub.properties(path, BlueZInterface.service)?["UUID"]?.text?.lowercased() ?? "")
                 }.map(hub.service)
                 delegate?.didDiscoverServices(self, error: 0)
                 done()
@@ -115,7 +116,7 @@ public final class LinuxPeripheral: BluetoothPeripheral {
         let wanted = Set(uuids.map(BlueZMapping.bluezUUID))
         enqueue { [self] done in
             service.discovered = hub.children(of: service.path, interface: BlueZInterface.characteristic, parentKey: "Service")
-                .filter { wanted.isEmpty || wanted.contains(hub.properties($0, BlueZInterface.characteristic)?["UUID"]?.stringValue?.lowercased() ?? "") }
+                .filter { wanted.isEmpty || wanted.contains(hub.properties($0, BlueZInterface.characteristic)?["UUID"]?.text?.lowercased() ?? "") }
                 .map(hub.characteristic)
             delegate?.didDiscoverCharacteristics(self, service: service, error: 0)
             done()
@@ -140,7 +141,7 @@ public final class LinuxPeripheral: BluetoothPeripheral {
         guard let characteristic = LinuxBluetooth.resolve(characteristic, as: LinuxCharacteristic.self) else { return }
         enqueue { [self] done in
             characteristic.reading = true
-            gatt(characteristic.path, BlueZInterface.characteristic, "ReadValue", [.options([:])], "a{sv}") { [self] result in
+            gatt(characteristic.path, BlueZInterface.characteristic, "ReadValue", [.vardict([:])], "a{sv}") { [self] result in
                 characteristic.reading = false
                 switch result {
                 case .success(let reply):
@@ -161,7 +162,7 @@ public final class LinuxPeripheral: BluetoothPeripheral {
         guard let characteristic = LinuxBluetooth.resolve(characteristic, as: LinuxCharacteristic.self) else { return }
         let withResponse = type != WriteType.withoutResponse.rawValue
         enqueue { [self] done in
-            let options: DBusValue = .options(["type": .string(withResponse ? "request" : "command")])
+            let options: DBusMessageArgument = .vardict(["type": .string(withResponse ? "request" : "command")])
             gatt(characteristic.path, BlueZInterface.characteristic, "WriteValue", [.byteArray(value), options], "aya{sv}") { [self] result in
                 if withResponse {
                     let error: Int32 = if case .failure(let error) = result { BlueZMapping.errorCode(error) } else { 0 }
@@ -203,7 +204,7 @@ public final class LinuxPeripheral: BluetoothPeripheral {
     public func readDescriptor(_ descriptor: any BluetoothDescriptor) {
         guard let descriptor = LinuxBluetooth.resolve(descriptor, as: LinuxDescriptor.self) else { return }
         enqueue { [self] done in
-            gatt(descriptor.path, BlueZInterface.descriptor, "ReadValue", [.options([:])], "a{sv}") { [self] result in
+            gatt(descriptor.path, BlueZInterface.descriptor, "ReadValue", [.vardict([:])], "a{sv}") { [self] result in
                 switch result {
                 case .success(let reply):
                     let value = reply.first?.bytes ?? []
@@ -222,7 +223,7 @@ public final class LinuxPeripheral: BluetoothPeripheral {
     public func writeDescriptor(_ value: [UInt8], for descriptor: any BluetoothDescriptor) {
         guard let descriptor = LinuxBluetooth.resolve(descriptor, as: LinuxDescriptor.self) else { return }
         enqueue { [self] done in
-            gatt(descriptor.path, BlueZInterface.descriptor, "WriteValue", [.byteArray(value), .options([:])], "aya{sv}") { [self] result in
+            gatt(descriptor.path, BlueZInterface.descriptor, "WriteValue", [.byteArray(value), .vardict([:])], "aya{sv}") { [self] result in
                 let error: Int32 = if case .failure(let error) = result { BlueZMapping.errorCode(error) } else { 0 }
                 delegate?.didWriteDescriptorValue(self, descriptor: descriptor, error: error)
                 done()
@@ -289,8 +290,8 @@ public final class LinuxPeripheral: BluetoothPeripheral {
 
     /// A GATT call whose reply is dropped if a disconnect already failed it.
     private func gatt(
-        _ path: String, _ interface: String, _ method: String, _ arguments: [DBusValue], _ signature: String?,
-        reply: @escaping (Result<[DBusValue], BlueZError>) -> Void
+        _ path: String, _ interface: String, _ method: String, _ arguments: [DBusMessageArgument], _ signature: String?,
+        reply: @escaping (Result<[DBusMessageArgument], BlueZError>) -> Void
     ) {
         let generation = self.generation
         hub.call(path, interface, method, arguments, signature: signature) { [weak self] result in
@@ -313,16 +314,16 @@ public final class LinuxPeripheral: BluetoothPeripheral {
         disconnecting = true
     }
 
-    func deviceChanged(_ device: [String: DBusValue], keys: Set<String>) {
+    func deviceChanged(_ device: [String: DBusMessageArgument], keys: Set<String>) {
         if keys.contains("Name") || keys.contains("Alias") {
             delegate?.didUpdateName(self)
         }
-        if device["ServicesResolved"]?.boolValue == true, device["Connected"]?.boolValue == true, !waitingForServices.isEmpty {
+        if device["ServicesResolved"]?.flag == true, device["Connected"]?.flag == true, !waitingForServices.isEmpty {
             let waiting = waitingForServices
             waitingForServices = []
             waiting.forEach { $0() }
         }
-        if keys.contains("Connected"), device["Connected"]?.boolValue != true {
+        if keys.contains("Connected"), device["Connected"]?.flag != true {
             disconnected(error: BluetoothError.notConnected.rawValue)
         }
     }
