@@ -92,6 +92,16 @@ import Testing
         #expect(loadError(other) == "_CodeSignature/CodeResources doesn't list \(other.target.sharedLibrary)")
     }
 
+    /// Each load is the library it names, though each is loaded by its
+    /// descriptor's `/proc/self/fd` name, which glibc would otherwise answer
+    /// with the library last loaded under that number.
+    @Test(.enabled(if: AppLibraryTests.canLoad)) func loadsEachLibraryItsOwn() throws {
+        let first = try bundle(app(status: 7))
+        let second = try bundle(app(status: 9))
+        #expect(try AppLibrary.load(bundle: first.path, target: first.target).entryPoints.main().rawValue == 7)
+        #expect(try AppLibrary.load(bundle: second.path, target: second.target).entryPoints.main().rawValue == 9)
+    }
+
     /// The library binds every symbol as it loads, so one the process
     /// lacks fails the launch, by name.
     @Test(.enabled(if: AppLibraryTests.canLoad)) func namesWhatTheProcessLacks() throws {
