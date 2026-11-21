@@ -10,25 +10,27 @@ import LinuxHost
 import DynamicUI
 import RuntimeABI
 import RuntimeFormatting
+import RuntimeNetworking
 
 /// What this host implements: the built-ins and its modules' contracts.
 public enum HostContracts {
 
     /// The modules `linux-app-host` registers (`HostApp.modules`): the
     /// player's contracts, without building the player, Bluetooth,
-    /// graphics, web views, files, settings, model stores, formatting, the
-    /// device and location.
+    /// graphics, web views, files, settings, model stores, formatting, HTTP,
+    /// the device and location.
     nonisolated(unsafe) public static let modules: [any HostModule.Type] = [
         PlayerContracts.self, LinuxBluetooth.self, LinuxGraphics.self, LinuxWebKit.self, LinuxFiles.self, LinuxDefaults.self,
-        LinuxModelStore.self, HostFormattingModule.self, LinuxDeviceModule.self, LinuxLocation.self,
+        LinuxModelStore.self, HostFormattingModule.self, HostNetworkingModule.self, LinuxDeviceModule.self, LinuxLocation.self,
     ]
 
     public static var provided: [String: ContractDescriptor] {
         AppCompatibility.providedContracts(modules)
     }
 
-    /// Capabilities some contract here serves: `network` is what lets a
-    /// web view's page reach the network, and `location` GeoClue's.
+    /// Capabilities some contract here serves: `network` is what lets an
+    /// HTTP session or a web view's page reach the network, and `location`
+    /// GeoClue's.
     public static let capabilities: Set<Capability> = [.bluetooth, .graphics, .network, .location]
 }
 
