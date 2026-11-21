@@ -347,15 +347,24 @@ let client = "/org/freedesktop/GeoClue2/Client/1"
         MainLoop.shared.drain()
         #expect(log.events == [notDetermined, "fail \(LocationError.servicesDisabled.rawValue)"])
 
-        // A request is answered, and nothing is decided.
+        // A request is answered `denied`, as with location off, though
+        // it isn't the app's refusal.
         manager.requestWhenInUseAuthorization()
         MainLoop.shared.drain()
-        #expect(log.events.last == notDetermined)
-        #expect(LinuxLocationManager.authorizationStatus() == LocationAuthorization.notDetermined.rawValue)
+        #expect(log.events.last == denied)
+        #expect(LinuxLocationManager.authorizationStatus() == LocationAuthorization.denied.rawValue)
+        #expect(LocationPermission().status() == .unavailable)
         var answers: [PermissionStatus] = []
         LocationPermission().request { answers.append($0) }
         MainLoop.shared.drain()
         #expect(answers == [.unavailable])
+
+        // GeoClue starting clears it.
+        geoClue.available = true
+        manager.requestWhenInUseAuthorization()
+        MainLoop.shared.drain()
+        #expect(LinuxLocationManager.authorizationStatus() == LocationAuthorization.authorizedAlways.rawValue)
+        #expect(log.events.last == authorized)
 
         // GeoClue with no sources has nothing to give.
         geoClue.available = true
