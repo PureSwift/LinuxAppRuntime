@@ -1,7 +1,8 @@
-import DBUS
+import DBus
+import LinuxDBus
 
 /// An object's interfaces, each with its properties (variants unwrapped).
-public typealias BlueZInterfaces = [String: [String: DBusValue]]
+public typealias BlueZInterfaces = [String: [String: DBusMessageArgument]]
 
 /// A D-Bus error BlueZ, or the bus, answered with.
 public struct BlueZError: Error, Equatable, Sendable, CustomStringConvertible {
@@ -34,7 +35,7 @@ public enum BlueZBusEvent {
     case unavailable(BlueZError)
     case added(path: String, interfaces: BlueZInterfaces)
     case removed(path: String, interfaces: [String])
-    case changed(path: String, interface: String, changed: [String: DBusValue], invalidated: [String])
+    case changed(path: String, interface: String, changed: [String: DBusMessageArgument], invalidated: [String])
 }
 
 /// The connection to BlueZ (`Plan.md` §6): the real system bus, or a fake
@@ -51,9 +52,9 @@ public protocol BlueZBus: AnyObject {
         _ path: String,
         _ interface: String,
         _ method: String,
-        _ arguments: [DBusValue],
+        _ arguments: [DBusMessageArgument],
         signature: String?,
-        reply: @escaping (Result<[DBusValue], BlueZError>) -> Void
+        reply: @escaping (Result<[DBusMessageArgument], BlueZError>) -> Void
     )
 }
 
@@ -69,83 +70,36 @@ enum BlueZInterface {
 
 // MARK: - Values
 
-public extension DBusValue {
-
-    /// The value inside any variants.
-    var unwrapped: DBusValue {
-        if case .variant(let variant) = self { return variant.value.unwrapped }
-        return self
-    }
-
-    var stringValue: String? {
-        switch unwrapped {
-        case .string(let string), .objectPath(let string): string
-        default: nil
-        }
-    }
-
-    var boolValue: Bool? {
-        if case .boolean(let value) = unwrapped { return value }
-        return nil
-    }
+/// BlueZ's values; the rest are LinuxDBus's (`text`, `flag`, `entries`,
+/// `vardict`).
+public extension DBusMessageArgument {
 
     var intValue: Int? {
-        switch unwrapped {
-        case .byte(let value): Int(value)
-        case .int16(let value): Int(value)
-        case .uint16(let value): Int(value)
-        case .int32(let value): Int(value)
-        case .uint32(let value): Int(value)
-        case .int64(let value): Int(value)
-        case .uint64(let value): Int(value)
-        default: nil
-        }
+        int64Value.map(Int.init)
     }
 
     /// `ay`.
     var bytes: [UInt8]? {
-        guard case .array(let elements) = unwrapped else { return nil }
-        return elements.compactMap { if case .byte(let byte) = $0.unwrapped { byte } else { nil } }
+        elements?.compactMap { if case .byte(let byte) = $0.contents { byte } else { nil } }
     }
 
     /// `as` or `ao`.
     var strings: [String] {
-        guard case .array(let elements) = unwrapped else { return [] }
-        return elements.compactMap(\.stringValue)
+        elements?.compactMap(\.text) ?? []
     }
 
-    static func byteArray(_ bytes: [UInt8]) -> DBusValue {
-        .array(bytes.map { .byte($0) })
-    }
-
-    /// `a{sv}`.
-    static func options(_ entries: [String: DBusValue]) -> DBusValue {
-        var dictionary: [DBusValue: DBusValue] = [:]
-        for (key, value) in entries {
-            dictionary[.string(key)] = .variant(DBusVariant(value))
-        }
-        return .dictionary(dictionary)
+    /// `ay`.
+    static func byteArray(_ bytes: [UInt8]) -> DBusMessageArgument {
+        .list(of: .byte, bytes.map { .byte($0) })
     }
 
     /// `a{sa{sv}}` as interfaces and their properties.
     func interfaces() -> BlueZInterfaces {
-        guard case .dictionary(let entries) = unwrapped else { return [:] }
         var interfaces: BlueZInterfaces = [:]
-        for (name, properties) in entries {
-            guard let name = name.stringValue else { continue }
-            interfaces[name] = properties.properties()
+        for (name, properties) in pairs ?? [] {
+            guard let name = name.text else { continue }
+            interfaces[name] = properties.entries
         }
         return interfaces
-    }
-
-    /// `a{sv}`, the variants unwrapped.
-    func properties() -> [String: DBusValue] {
-        guard case .dictionary(let entries) = unwrapped else { return [:] }
-        var properties: [String: DBusValue] = [:]
-        for (name, value) in entries {
-            guard let name = name.stringValue else { continue }
-            properties[name] = value.unwrapped
-        }
-        return properties
     }
 }
