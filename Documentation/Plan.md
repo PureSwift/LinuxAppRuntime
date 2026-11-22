@@ -52,7 +52,7 @@ contracts. D-Bus is PureSwift/DBus, in Swift, without libdbus.
 | arm64 and x86_64 Linux with glibc (Debian 13, Ubuntu 24.04+) | armv7, musl |
 | Native slices, loaded by the runner | `App.wasm`, in an engine in the runner; wasm2c for a target a bundle lacks, before it's installed |
 | Wayland and X11 through SDL3; a headless driver for tests | Multiple windows |
-| `Renderer`, `BluetoothCentral` and friends, GL surfaces, web views, files, settings, model stores, date and number formatting, HTTP, the device, location, documents, the built-ins | Motion (iio-sensor-proxy), NFC (neard) |
+| `Renderer`, `BluetoothCentral` and friends, GL surfaces, web views, files, settings, model stores, date and number formatting, HTTP, the device, location, documents, motion, the built-ins | NFC (neard) |
 
 ## 2. Process model
 
@@ -99,12 +99,13 @@ timers for `schedule`.
 | `LinuxGraphics` | `Surface` over EGL and GLES 2.0, loaded at run time; the player's `GLSurface` view shows it (§7) |
 | `LinuxWebKit` | `WebContent` over WPE WebKit, loaded at run time; the player's `WebView` view shows it (§8) |
 | `LinuxCoreModel` | `LinuxModelStore`: the model store over CoreModel-SQLite, through AppRuntime's `HostModelStore` (§9) |
-| `LinuxDevice` | `Device` from `/etc`, DMI, the device tree, and power and heat in sysfs (§10) |
+| `LinuxDevice` | `Device` from `/etc`, DMI, the device tree, and power and heat in sysfs; orientation and proximity from iio-sensor-proxy (§10) |
 | `LinuxDBus` | `Bus`: the system and session buses, for the modules that talk to system services: method calls, properties and signals by match rule, delivered on the main loop (§11.1) |
 | `LinuxLocation` | `LocationManager`, `Location` and `Heading` over GeoClue 2 (§11) |
 | `LinuxDocuments` | `Documents`: AppRuntime's `HostDocuments` with the desktop portal's file chooser, and bookmarks (§12) |
+| `LinuxMotion` | `MotionManager` and `Altimeter` over the kernel's IIO sensors in sysfs, and an unavailable `Pedometer` and `ActivityRecognizer` (§13) |
 | `LinuxHostApp` | `main`: reads the app's keys, starts the host, and runs Cacao's SDL loop with one window showing the guest's first renderer |
-| `LinuxPackager`, `linux-app` | The packager (§14, [Packager.md](Packager.md)) |
+| `LinuxPackager`, `linux-app` | The packager (§15, [Packager.md](Packager.md)) |
 
 The package depends on AppRuntime without its `GuestExports` trait, like
 DarwinAppRuntime, so the slice's `rt_dispatch` and `rt_finalize` are the
@@ -439,8 +440,17 @@ asked of D-Bus:
   monitoring is on, low power and thermal state always.
 - **Firmware placeholders** in DMI ("To be filled by O.E.M.", "Default
   string") count as nothing.
-- **Orientation and proximity** read as unknown and off: they come from
-  iio-sensor-proxy, with the motion contracts.
+- **Orientation and proximity** are iio-sensor-proxy's
+  (`net.hadess.SensorProxy`, on the system bus). Enabling orientation
+  claims its accelerometer, if it has one, and `AccelerometerOrientation`
+  is the orientation: `normal` portrait (the device's natural
+  orientation), `bottom-up` upside down, `left-up` (the top to the right)
+  `landscapeRight`, `right-up` `landscapeLeft`; it has no face up or down.
+  Enabling proximity asks whether it has a sensor, waiting for the answer,
+  and claims it if so; `ProximityNear` is the state. Each change from
+  `PropertiesChanged` reaches the delegate once, and disabling releases
+  the sensor. Without iio-sensor-proxy, orientation reads as unknown and
+  proximity monitoring stays off.
 
 ## 11. Location
 
@@ -502,8 +512,9 @@ of its own, made when it first needs one:
 
 ### 11.1 D-Bus
 
-`LinuxDBus` is what Bluetooth and Location, and later Motion
-(iio-sensor-proxy), NFC (neard) and the desktop portal, share. `Bus.system`
+`LinuxDBus` is what Bluetooth, Location, the device's orientation and
+proximity (iio-sensor-proxy) and the desktop portal, and later NFC (neard),
+share. `Bus.system`
 and `Bus.session` are one connection each per process, made on first use
 through PureSwift/DBus, which speaks D-Bus in Swift, without libdbus; its
 values are `DBusMessageArgument`s, whose arrays and dictionaries carry
@@ -576,7 +587,61 @@ another, outside the app.
   handle from xdg-foreign. The titles and the filter's name are English.
   The photo picker is the file chooser for images and videos.
 
-## 13. Testing
+## 13. Motion
+
+`LinuxMotion` is the Motion contracts (AppRuntime's `Motion.md`).
+iio-sensor-proxy only says which way the screen is up, which is the
+device's orientation (§10), so the samples come from the kernel's
+Industrial I/O sensors themselves, read through sysfs
+(`/sys/bus/iio/devices/iio:deviceN`), as iio-sensor-proxy reads the ones it
+polls. Reading them needs no permission.
+
+| Sensor | IIO channel | Contract |
+|---|---|---|
+| Accelerometer | `in_accel_{x,y,z}`, m/s² | as it is: face up, z ≈ +9.81 |
+| Gyroscope | `in_anglvel_{x,y,z}`, rad/s | as it is |
+| Magnetometer | `in_magn_{x,y,z}`, gauss | ×100, µT; accuracy `uncalibrated` |
+| Device motion | the accelerometer and gyroscope | fused (below) |
+| Barometer | `in_pressure`, kPa | `Altimeter` |
+
+- **Sensors** are the first IIO device, by number, with each one's
+  channels. A channel's value is its `_input`, or `(_raw + offset) ×
+  scale`, its own scale and offset or its type's. Its mount matrix (the
+  type's `_mount_matrix`, or the device's `mount_matrix`) turns the
+  sensor's axes into the device's, which are the contract's: x to the
+  right, y toward the top, z out of the screen.
+- **Samples** are polled off the main thread, since a driver may answer
+  over I²C, on one queue for every sensor, at the interval asked for: no
+  faster than 100 Hz, as on iOS, or than the sensor's fastest
+  `sampling_frequency_available`, which is `minimumInterval`. Each is
+  stamped with `CLOCK_BOOTTIME` as it's read, and posted to the main loop;
+  none arrives after `stop`. Each attribute's file stays open, and is read
+  again from its start.
+- **Device motion** is a Mahony filter: it integrates the rotation rate and
+  pulls the attitude toward the gravity the accelerometer measures. It
+  starts level with the first reading, so its attitude has z vertical and
+  x where the device's x pointed, as Android's game rotation vector does;
+  nothing corrects drift around the vertical. Gravity is the vertical in
+  the device's axes, and user acceleration what's left without it.
+- **Failing**: a sensor that isn't there fails at `start` with
+  `unavailable`. One that stops reading stops, `unavailable` once it's gone
+  and `unknown` otherwise. A driver streaming to its buffer, as one does
+  while iio-sensor-proxy has it claimed, may answer busy: those readings
+  are skipped.
+- **The altimeter** reads the pressure once a second, as CoreMotion
+  delivers it, and the relative altitude is the standard atmosphere's from
+  the first reading, as Android's `SensorManager.getAltitude` computes it.
+  Nothing asks the user, as on Android: it's `authorized`, and `motion`
+  asks for nothing.
+- **The pedometer and activity recognition** have nothing under them on
+  Linux. They're registered, so an app written for phones runs: not
+  available, `authorized`, and updates and queries fail with
+  `unavailable`.
+- **Not yet**: an IIO device plugged in or out while a sensor runs isn't
+  noticed until it's started again, and the magnetometer isn't calibrated.
+  None of it has run on real sensors.
+
+## 14. Testing
 
 - `LinuxUI`: DarwinUI's tests, on Cacao (§5).
 - `LinuxBluetooth`: the contract against a fake `BlueZBus` that plays
@@ -596,7 +661,17 @@ another, outside the app.
   temporary root: identity, idioms, batteries (energy and capacity, a
   mouse's left out, each status), thermal states, low power, the vendor
   identifier kept per vendor, and changes reaching the delegate once each,
-  by themselves on the main loop.
+  by themselves on the main loop. Orientation and proximity against a fake
+  iio-sensor-proxy: claimed and released, each change once, turned off
+  before the proxy answered, and no sensor or no proxy.
+- `LinuxMotion`: IIO devices' attributes under a temporary root: scaled
+  readings in the device's axes by the mount matrix, inputs, offsets and
+  units, the first device by number, the fastest sampling; the fusion
+  starting level with gravity, integrating a quarter turn, and following
+  gravity back; samples reaching the delegate on the main loop and none
+  after `stop`, a missing sensor, one that stops reading, the
+  magnetometer's accuracy; the altimeter's altitude, and no barometer; the
+  pedometer and activity recognizer unavailable; the module's contracts.
 - `LinuxLocation`: the contract against a fake `GeoClueBus` that plays
   GeoClue's manager, clients, agent and locations. Runs on macOS and Linux:
   nothing asked until a client's needed; the client's desktop ID and
@@ -649,7 +724,7 @@ another, outside the app.
   `bluetoothd`. Real GeoClue needs a session with an agent, or the app
   allowed in `geoclue.conf`.
 
-## 14. Phases
+## 15. Phases
 
 1. **Host runtime and player**: `LinuxHost`, `LinuxUI`, `LinuxBluetooth`,
    `LinuxHostApp`; `ExampleUI` runs in Docker.
@@ -657,14 +732,14 @@ another, outside the app.
    thinned to the target's `libapp.so`, a `.desktop` file and icon, for
    the runner; later Flatpak and AppImage, whose manifests carry the
    capabilities (`--system-talk-name=org.bluez` for `bluetooth`).
-3. **More contracts**: Motion (iio-sensor-proxy), NFC (neard).
-   Formatting and HTTP are done: AppRuntime's `RuntimeFormatting` and
-   `RuntimeNetworking` (§3), and so are the device (§10), location
-   (§11), over GeoClue2, and documents (§12), over the desktop portal.
+3. **More contracts**: NFC (neard). Formatting and HTTP are done:
+   AppRuntime's `RuntimeFormatting` and `RuntimeNetworking` (§3), and so
+   are the device (§10), location (§11), over GeoClue2, documents (§12),
+   over the desktop portal, and motion (§13), over IIO.
 4. **Player**: what DarwinUI and Cacao add: Cacao's AT-SPI bridge, input
    replay for end-to-end tests.
 
-## 15. Open questions
+## 16. Open questions
 
 - **Permissions.** Desktop Linux has no prompts for Bluetooth; Flatpak's
   portals cover location and the camera. `Permissions.request` answers from

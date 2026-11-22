@@ -69,6 +69,7 @@ let package = Package(
         .library(name: "LinuxDevice", targets: ["LinuxDevice"]),
         .library(name: "LinuxDBus", targets: ["LinuxDBus"]),
         .library(name: "LinuxLocation", targets: ["LinuxLocation"]),
+        .library(name: "LinuxMotion", targets: ["LinuxMotion"]),
         .library(name: "LinuxHostApp", targets: ["LinuxHostApp"]),
         .executable(name: "linux-app-host", targets: ["LinuxAppHost"]),
         .executable(name: "linux-app", targets: ["LinuxAppTool"]),
@@ -159,10 +160,10 @@ let package = Package(
         // MARK: - Device
 
         // The machine: /etc, DMI, the device tree, and power and heat in
-        // sysfs.
+        // sysfs; orientation and proximity from iio-sensor-proxy.
         .target(
             name: "LinuxDevice",
-            dependencies: ["LinuxHost", runtime("DynamicDevice"), runtime("DynamicRuntime")],
+            dependencies: ["LinuxHost", "LinuxDBus", runtime("DynamicDevice"), runtime("DynamicRuntime"), .product(name: "DBus", package: "DBus")],
             swiftSettings: host
         ),
 
@@ -199,6 +200,16 @@ let package = Package(
             swiftSettings: host
         ),
 
+        // MARK: - Motion
+
+        // The kernel's IIO sensors in sysfs: accelerometer, gyroscope,
+        // magnetometer and barometer.
+        .target(
+            name: "LinuxMotion",
+            dependencies: ["LinuxHost", runtime("DynamicMotion"), runtime("DynamicRuntime"), runtime("RuntimeHost")],
+            swiftSettings: host
+        ),
+
         // MARK: - App
 
         // What the runner's process supplies that libc may not
@@ -206,7 +217,7 @@ let package = Package(
         .target(name: "CLinuxHost"),
         .target(
             name: "LinuxHostApp",
-            dependencies: ["LinuxHost", "LinuxUI", "LinuxBluetooth", "LinuxGraphics", "LinuxWebKit", "LinuxCoreModel", "LinuxDevice", "LinuxLocation", "LinuxDocuments", "CLinuxHost", runtime("CRuntime"), runtime("RuntimeFormatting"), runtime("RuntimeNetworking"),
+            dependencies: ["LinuxHost", "LinuxUI", "LinuxBluetooth", "LinuxGraphics", "LinuxWebKit", "LinuxCoreModel", "LinuxDevice", "LinuxLocation", "LinuxDocuments", "LinuxMotion", "CLinuxHost", runtime("CRuntime"), runtime("RuntimeFormatting"), runtime("RuntimeNetworking"),
                            runtime("DynamicGraphics"), .product(name: "CacaoSDL", package: "Cacao")],
             swiftSettings: host
         ),
@@ -230,7 +241,7 @@ let package = Package(
         // doesn't build Cacao.
         .target(
             name: "LinuxPackager",
-            dependencies: ["LinuxHost", "LinuxBluetooth", "LinuxGraphics", "LinuxWebKit", "LinuxCoreModel", "LinuxDevice", "LinuxLocation", "LinuxDocuments", runtime("RuntimeFormatting"), runtime("RuntimeNetworking"), runtime("DynamicUI"),
+            dependencies: ["LinuxHost", "LinuxBluetooth", "LinuxGraphics", "LinuxWebKit", "LinuxCoreModel", "LinuxDevice", "LinuxLocation", "LinuxDocuments", "LinuxMotion", runtime("RuntimeFormatting"), runtime("RuntimeNetworking"), runtime("DynamicUI"),
                            .product(name: "Crypto", package: "swift-crypto")]
         ),
         .executableTarget(
@@ -255,7 +266,8 @@ let package = Package(
                            .product(name: "CoreModelSQLite", package: "CoreModel-SQLite")],
             swiftSettings: host
         ),
-        .testTarget(name: "LinuxDeviceTests", dependencies: ["LinuxDevice", runtime("DynamicDevice")], swiftSettings: host),
+        .testTarget(name: "LinuxDeviceTests", dependencies: ["LinuxDevice", "LinuxDBus", runtime("DynamicDevice"), .product(name: "DBus", package: "DBus")],
+                    swiftSettings: host),
         .testTarget(name: "LinuxDBusTests", dependencies: ["LinuxDBus", .product(name: "DBus", package: "DBus")], swiftSettings: host),
         .testTarget(name: "LinuxLocationTests", dependencies: ["LinuxLocation", "LinuxDBus", runtime("DynamicLocation"), .product(name: "DBus", package: "DBus")],
                     swiftSettings: host),
@@ -263,6 +275,7 @@ let package = Package(
                                                             runtime("DynamicFiles"), runtime("RuntimeHost"), runtime("RuntimeNative"),
                                                             .product(name: "DBus", package: "DBus")],
                     swiftSettings: host),
+        .testTarget(name: "LinuxMotionTests", dependencies: ["LinuxMotion", runtime("DynamicMotion")], swiftSettings: host),
         .testTarget(name: "LinuxWebKitTests", dependencies: ["LinuxWebKit", runtime("DynamicWebKit")], swiftSettings: host),
         .testTarget(name: "LinuxPackagerTests", dependencies: ["LinuxPackager", "LinuxHostApp", runtime("RuntimeNetworking")]),
     ]
