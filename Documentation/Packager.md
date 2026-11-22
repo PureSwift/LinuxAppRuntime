@@ -35,7 +35,7 @@ again at every launch, since it may have changed since.
 | … at the same version or later | warning: methods added later resolve as absent |
 | The bundle has `_CodeSignature/CodeResources`, and it matches every file's SHA-256 | error: the runner loads no library its bundle doesn't vouch for |
 | `lib/<target>/libapp.so` is there, and is a shared library for the target's machine and word size | error |
-| A declared capability this host has no contract for (motion, NFC, …) | warning |
+| A declared capability this host has no contract for (notifications, …) | warning |
 
 `guest.py` has checked the rest of the library when it built it: that it
 names no other library, binds as it loads, exports the three guest exports
