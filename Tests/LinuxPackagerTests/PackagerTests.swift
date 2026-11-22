@@ -33,13 +33,13 @@ import Testing
 
     @Test func contractsThisHostLacks() throws {
         let fixture = try Fixture(contracts: [
-            ("org.pureswift.motion.MotionManager", 1, "contract"),
+            ("org.pureswift.nfc.Reader", 1, "contract"),
             ("org.pureswift.ui.Renderer", 99, "contract"),
             ("org.pureswift.ui.RendererDelegate", 1, "contract"),
         ])
         let strict = try diagnostics(fixture)
         #expect(strict.filter { $0.severity == .error }.map(\.message) == [
-            "org.pureswift.motion.MotionManager isn't implemented on Linux",
+            "org.pureswift.nfc.Reader isn't implemented on Linux",
             "org.pureswift.ui.RendererDelegate is a different kind of interface on Linux",
         ])
         #expect(strict.contains { $0.severity == .warning && $0.message.contains("Renderer is version") })
@@ -80,6 +80,21 @@ import Testing
             ("org.pureswift.documents.Callback", 1, "callback"),
             ("org.pureswift.documents.Delegate", 1, "callback"),
         ], capabilities: ["userFiles"])
+        #expect(try diagnostics(fixture).map(\.message) == [])
+    }
+
+    @Test func motionIsImplemented() throws {
+        let fixture = try Fixture(contracts: [
+            ("org.pureswift.ui.Renderer", 1, "contract"),
+            ("org.pureswift.motion.MotionManager", 1, "contract"),
+            ("org.pureswift.motion.MotionManagerDelegate", 1, "callback"),
+            ("org.pureswift.motion.Altimeter", 1, "contract"),
+            ("org.pureswift.motion.AltimeterDelegate", 1, "callback"),
+            ("org.pureswift.motion.Pedometer", 1, "contract"),
+            ("org.pureswift.motion.PedometerDelegate", 1, "callback"),
+            ("org.pureswift.motion.ActivityRecognizer", 1, "contract"),
+            ("org.pureswift.motion.ActivityRecognizerDelegate", 1, "callback"),
+        ], capabilities: ["motion"])
         #expect(try diagnostics(fixture).map(\.message) == [])
     }
 
@@ -153,8 +168,8 @@ import Testing
     }
 
     @Test func capabilitiesWithoutSupportWarn() throws {
-        let messages = try diagnostics(Fixture(capabilities: ["bluetooth", "location", "motion"]))
-        #expect(messages == [.warning("the app declares motion, which the Linux host doesn't support yet")])
+        let messages = try diagnostics(Fixture(capabilities: ["bluetooth", "location", "motion", "nfc"]))
+        #expect(messages == [.warning("the app declares nfc, which the Linux host doesn't support yet")])
     }
 
     @Test func theHostAndThePackagerAgreeOnModules() {
