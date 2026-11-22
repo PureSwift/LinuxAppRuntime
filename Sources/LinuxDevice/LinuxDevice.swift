@@ -1,6 +1,8 @@
+import DBus
 import DynamicDevice
 import DynamicRuntime
 import Foundation
+import LinuxDBus
 import LinuxHost
 
 /// The `Device` contract on Linux (`Plan.md` §10): identity from
@@ -12,12 +14,17 @@ import LinuxHost
 /// delegate: battery level and state while battery monitoring is on, and
 /// low power and thermal state always, as on other hosts.
 ///
-/// Orientation and proximity read as unknown: they come from
-/// iio-sensor-proxy, with the motion contracts.
+/// Orientation and proximity are iio-sensor-proxy's, on the system bus:
+/// its accelerometer's orientation and its proximity sensor, claimed while
+/// they're enabled. Without it, orientation reads as unknown and proximity
+/// monitoring stays off.
 public final class LinuxDevice: Device {
 
     /// The machine's files; replaceable for tests.
     nonisolated(unsafe) static var system = SystemInfo()
+
+    /// iio-sensor-proxy; replaceable for tests.
+    nonisolated(unsafe) static var sensorProxy: any SensorProxyBus = SystemSensorProxy()
 
     /// How often changes are looked for.
     nonisolated(unsafe) static var interval: Int64 = 5_000_000_000
@@ -32,6 +39,18 @@ public final class LinuxDevice: Device {
 
     /// What the delegate was last told.
     private var last: (level: Float, state: BatteryState, lowPower: Bool, thermal: ThermalState)?
+
+    /// The app's wish, and whether the proxy has the sensor claimed for it.
+    private var orientationUpdates = false
+    private var accelerometerClaimed = false
+    private var currentOrientation = DeviceOrientation.unknown
+
+    private var proximityMonitoring = false
+    private var proximityClaimed = false
+    private var near = false
+
+    /// The proxy's `PropertiesChanged`, while either is enabled.
+    private var changes: BusSubscription?
 
     init() { }
 
@@ -48,6 +67,9 @@ public final class LinuxDevice: Device {
     static func reset() {
         if let timer = instance?.timer {
             MainLoop.shared.cancel(timer)
+        }
+        if let changes = instance?.changes {
+            sensorProxy.unsubscribe(changes)
         }
         instance = nil
     }
@@ -148,21 +170,134 @@ public final class LinuxDevice: Device {
 
     // MARK: Orientation and proximity
 
-    public func setOrientationUpdatesEnabled(_ enabled: Bool) { }
-
-    public func orientation() -> Int32 {
-        DeviceOrientation.unknown.rawValue
+    /// Claims the proxy's accelerometer, if it has one; the orientation
+    /// arrives on a later turn, and the delegate hears of it.
+    public func setOrientationUpdatesEnabled(_ enabled: Bool) {
+        guard enabled != orientationUpdates else { return }
+        orientationUpdates = enabled
+        if enabled {
+            subscribe()
+            claim(has: "HasAccelerometer", "ClaimAccelerometer", wanted: { $0.orientationUpdates }) { device, properties in
+                device.accelerometerClaimed = true
+                device.orient(properties["AccelerometerOrientation"]?.text)
+            }
+        } else {
+            if accelerometerClaimed {
+                accelerometerClaimed = false
+                release("ReleaseAccelerometer")
+            }
+            currentOrientation = .unknown
+            unsubscribeIfIdle()
+        }
     }
 
-    /// There's no proximity sensor to turn on.
-    public func setProximityMonitoringEnabled(_ enabled: Bool) { }
+    public func orientation() -> Int32 {
+        currentOrientation.rawValue
+    }
+
+    /// Asks the proxy whether there's a proximity sensor, waiting for the
+    /// answer, and claims it if there is; it stays off if not.
+    public func setProximityMonitoringEnabled(_ enabled: Bool) {
+        guard enabled != proximityMonitoring else { return }
+        if enabled {
+            guard (try? Self.sensorProxy.propertyAndWait("HasProximity").get())?.flag == true else { return }
+            proximityMonitoring = true
+            subscribe()
+            claim(has: "HasProximity", "ClaimProximity", wanted: { $0.proximityMonitoring }) { device, properties in
+                device.proximityClaimed = true
+                device.approach(properties["ProximityNear"]?.flag ?? false)
+            }
+        } else {
+            proximityMonitoring = false
+            if proximityClaimed {
+                proximityClaimed = false
+                release("ReleaseProximity")
+            }
+            near = false
+            unsubscribeIfIdle()
+        }
+    }
 
     public func isProximityMonitoringEnabled() -> Bool {
-        false
+        proximityMonitoring
     }
 
     public func proximityState() -> Bool {
-        false
+        near
+    }
+
+    // MARK: iio-sensor-proxy
+
+    /// Claims a sensor the proxy has, while it's still `wanted`, and hands
+    /// over the properties once it's claimed.
+    private func claim(has: String, _ method: String, wanted: @escaping (LinuxDevice) -> Bool,
+                       claimed: @escaping (LinuxDevice, [String: DBusMessageArgument]) -> Void) {
+        let proxy = Self.sensorProxy
+        proxy.properties { [weak self] result in
+            guard let self, wanted(self) else { return }
+            guard case .success(let properties) = result, properties[has]?.flag == true else {
+                if case .failure(let error) = result, !error.isServiceMissing {
+                    HostLog.error("device: iio-sensor-proxy: \(error)")
+                }
+                return
+            }
+            proxy.call(method) { [weak self] result in
+                guard let self else { return }
+                if case .failure(let error) = result {
+                    HostLog.error("device: iio-sensor-proxy: \(method): \(error)")
+                    return
+                }
+                guard wanted(self) else {
+                    self.release(method.replacingOccurrences(of: "Claim", with: "Release"))
+                    return
+                }
+                // What it reads now it's claimed.
+                proxy.properties { [weak self] result in
+                    guard let self, wanted(self), case .success(let properties) = result else { return }
+                    claimed(self, properties)
+                }
+            }
+        }
+    }
+
+    private func release(_ method: String) {
+        Self.sensorProxy.call(method) { result in
+            if case .failure(let error) = result {
+                HostLog.error("device: iio-sensor-proxy: \(method): \(error)")
+            }
+        }
+    }
+
+    private func subscribe() {
+        guard changes == nil else { return }
+        changes = Self.sensorProxy.subscribeToChanges { [weak self] changed in
+            guard let self else { return }
+            if self.accelerometerClaimed, let orientation = changed["AccelerometerOrientation"]?.text {
+                self.orient(orientation)
+            }
+            if self.proximityClaimed, let near = changed["ProximityNear"]?.flag {
+                self.approach(near)
+            }
+        }
+    }
+
+    private func unsubscribeIfIdle() {
+        guard !orientationUpdates, !proximityMonitoring, let changes else { return }
+        Self.sensorProxy.unsubscribe(changes)
+        self.changes = nil
+    }
+
+    private func orient(_ name: String?) {
+        let orientation = SensorProxy.orientation(name ?? "")
+        guard orientation != currentOrientation else { return }
+        currentOrientation = orientation
+        delegate?.didChangeOrientation(self, orientation: orientation.rawValue)
+    }
+
+    private func approach(_ near: Bool) {
+        guard near != self.near else { return }
+        self.near = near
+        delegate?.didChangeProximityState(self, near: near)
     }
 
     // MARK: Changes
