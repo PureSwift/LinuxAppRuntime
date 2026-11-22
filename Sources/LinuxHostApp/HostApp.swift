@@ -11,6 +11,7 @@ import LinuxDocuments
 import LinuxGraphics
 import LinuxLocation
 import LinuxMotion
+import LinuxNFC
 import LinuxWebKit
 import LinuxUI
 import RuntimeFormatting
@@ -38,11 +39,11 @@ public enum HostApp {
     /// Bluetooth, GL surfaces and web pages, which the player shows, the
     /// app's files, settings and model stores, AppRuntime's date and number
     /// formatting and its HTTP client over Swift Foundation, the device,
-    /// location, the user's documents, and motion sensors.
+    /// location, the user's documents, motion sensors and NFC tags.
     public static let modules: [any HostModule.Type] = [
         DarwinUI.self, LinuxBluetooth.self, LinuxGraphics.self, LinuxWebKit.self, LinuxFiles.self, LinuxDefaults.self,
         LinuxModelStore.self, HostFormattingModule.self, HostNetworkingModule.self, LinuxDeviceModule.self, LinuxLocation.self,
-        LinuxDocuments.self, LinuxMotion.self,
+        LinuxDocuments.self, LinuxMotion.self, LinuxNFC.self,
     ]
 
     /// Points AppRuntime's modules at this host: networking's callbacks,

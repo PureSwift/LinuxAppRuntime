@@ -33,13 +33,13 @@ import Testing
 
     @Test func contractsThisHostLacks() throws {
         let fixture = try Fixture(contracts: [
-            ("org.pureswift.nfc.Reader", 1, "contract"),
+            ("org.pureswift.notifications.Notifications", 1, "contract"),
             ("org.pureswift.ui.Renderer", 99, "contract"),
             ("org.pureswift.ui.RendererDelegate", 1, "contract"),
         ])
         let strict = try diagnostics(fixture)
         #expect(strict.filter { $0.severity == .error }.map(\.message) == [
-            "org.pureswift.nfc.Reader isn't implemented on Linux",
+            "org.pureswift.notifications.Notifications isn't implemented on Linux",
             "org.pureswift.ui.RendererDelegate is a different kind of interface on Linux",
         ])
         #expect(strict.contains { $0.severity == .warning && $0.message.contains("Renderer is version") })
@@ -95,6 +95,18 @@ import Testing
             ("org.pureswift.motion.ActivityRecognizer", 1, "contract"),
             ("org.pureswift.motion.ActivityRecognizerDelegate", 1, "callback"),
         ], capabilities: ["motion"])
+        #expect(try diagnostics(fixture).map(\.message) == [])
+    }
+
+    @Test func nfcIsImplemented() throws {
+        let fixture = try Fixture(contracts: [
+            ("org.pureswift.ui.Renderer", 1, "contract"),
+            ("org.pureswift.nfc.Reader", 1, "contract"),
+            ("org.pureswift.nfc.ReaderDelegate", 1, "callback"),
+            ("org.pureswift.nfc.Tag", 1, "contract"),
+            ("org.pureswift.nfc.NDEFMessage", 1, "contract"),
+            ("org.pureswift.nfc.NDEFRecord", 1, "contract"),
+        ], capabilities: ["nfc"])
         #expect(try diagnostics(fixture).map(\.message) == [])
     }
 
@@ -168,8 +180,8 @@ import Testing
     }
 
     @Test func capabilitiesWithoutSupportWarn() throws {
-        let messages = try diagnostics(Fixture(capabilities: ["bluetooth", "location", "motion", "nfc"]))
-        #expect(messages == [.warning("the app declares nfc, which the Linux host doesn't support yet")])
+        let messages = try diagnostics(Fixture(capabilities: ["bluetooth", "location", "motion", "nfc", "notifications"]))
+        #expect(messages == [.warning("the app declares notifications, which the Linux host doesn't support yet")])
     }
 
     @Test func theHostAndThePackagerAgreeOnModules() {

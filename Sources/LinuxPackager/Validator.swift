@@ -7,6 +7,7 @@ import LinuxDocuments
 import LinuxGraphics
 import LinuxLocation
 import LinuxMotion
+import LinuxNFC
 import LinuxWebKit
 import LinuxHost
 import DynamicUI
@@ -20,11 +21,11 @@ public enum HostContracts {
     /// The modules `linux-app-host` registers (`HostApp.modules`): the
     /// player's contracts, without building the player, Bluetooth,
     /// graphics, web views, files, settings, model stores, formatting, HTTP,
-    /// the device, location, documents and motion.
+    /// the device, location, documents, motion and NFC.
     nonisolated(unsafe) public static let modules: [any HostModule.Type] = [
         PlayerContracts.self, LinuxBluetooth.self, LinuxGraphics.self, LinuxWebKit.self, LinuxFiles.self, LinuxDefaults.self,
         LinuxModelStore.self, HostFormattingModule.self, HostNetworkingModule.self, LinuxDeviceModule.self, LinuxLocation.self,
-        LinuxDocuments.self, LinuxMotion.self,
+        LinuxDocuments.self, LinuxMotion.self, LinuxNFC.self,
     ]
 
     public static var provided: [String: ContractDescriptor] {
@@ -33,9 +34,9 @@ public enum HostContracts {
 
     /// Capabilities some contract here serves: `network` is what lets an
     /// HTTP session or a web view's page reach the network, `location`
-    /// GeoClue's, `userFiles` the documents' pickers, and `motion` the
-    /// altimeter, which asks nothing.
-    public static let capabilities: Set<Capability> = [.bluetooth, .graphics, .network, .location, .userFiles, .motion]
+    /// GeoClue's, `userFiles` the documents' pickers, `motion` the
+    /// altimeter, which asks nothing, and `nfc` neard's.
+    public static let capabilities: Set<Capability> = [.bluetooth, .graphics, .network, .location, .userFiles, .motion, .nfc]
 }
 
 /// The checks of `Packager.md` §1, which install makes before it copies an

@@ -52,7 +52,7 @@ contracts. D-Bus is PureSwift/DBus, in Swift, without libdbus.
 | arm64 and x86_64 Linux with glibc (Debian 13, Ubuntu 24.04+) | armv7, musl |
 | Native slices, loaded by the runner | `App.wasm`, in an engine in the runner; wasm2c for a target a bundle lacks, before it's installed |
 | Wayland and X11 through SDL3; a headless driver for tests | Multiple windows |
-| `Renderer`, `BluetoothCentral` and friends, GL surfaces, web views, files, settings, model stores, date and number formatting, HTTP, the device, location, documents, motion, the built-ins | NFC (neard) |
+| `Renderer`, `BluetoothCentral` and friends, GL surfaces, web views, files, settings, model stores, date and number formatting, HTTP, the device, location, documents, motion, NFC tags, the built-ins | |
 
 ## 2. Process model
 
@@ -104,8 +104,9 @@ timers for `schedule`.
 | `LinuxLocation` | `LocationManager`, `Location` and `Heading` over GeoClue 2 (§11) |
 | `LinuxDocuments` | `Documents`: AppRuntime's `HostDocuments` with the desktop portal's file chooser, and bookmarks (§12) |
 | `LinuxMotion` | `MotionManager` and `Altimeter` over the kernel's IIO sensors in sysfs, and an unavailable `Pedometer` and `ActivityRecognizer` (§13) |
+| `LinuxNFC` | `NFCReader`, `NFCTag`, `NDEFMessage` and `NDEFRecord` over neard (§14) |
 | `LinuxHostApp` | `main`: reads the app's keys, starts the host, and runs Cacao's SDL loop with one window showing the guest's first renderer |
-| `LinuxPackager`, `linux-app` | The packager (§15, [Packager.md](Packager.md)) |
+| `LinuxPackager`, `linux-app` | The packager (§16, [Packager.md](Packager.md)) |
 
 The package depends on AppRuntime without its `GuestExports` trait, like
 DarwinAppRuntime, so the slice's `rt_dispatch` and `rt_finalize` are the
@@ -513,7 +514,7 @@ of its own, made when it first needs one:
 ### 11.1 D-Bus
 
 `LinuxDBus` is what Bluetooth, Location, the device's orientation and
-proximity (iio-sensor-proxy) and the desktop portal, and later NFC (neard),
+proximity (iio-sensor-proxy), NFC (neard) and the desktop portal
 share. `Bus.system`
 and `Bus.session` are one connection each per process, made on first use
 through PureSwift/DBus, which speaks D-Bus in Swift, without libdbus; its
@@ -641,7 +642,60 @@ polls. Reading them needs no permission.
   noticed until it's started again, and the magnetometer isn't calibrated.
   None of it has run on real sensors.
 
-## 14. Testing
+## 14. NFC
+
+`LinuxNFC` is the NFC contracts (AppRuntime's `NFC.md`) over neard, the
+Linux NFC daemon (`org.neard` on the system bus), which drives the
+kernel's NFC adapters: the reader role, reading and writing NDEF. neard
+publishes its adapters (`/org/neard/nfc0`), the tags in their field
+(`…/tag0`) and each tag's records (`…/tag0/record0`) through
+`org.freedesktop.DBus.ObjectManager` at `/`. `NeardBus` abstracts the
+connection, so the contract is tested with a fake neard. What follows is
+from neard's source, not its documentation, which differs in places (the
+ISO 15693 protocol is `ISO-15693`, and there's no `TagFound` signal).
+
+| | neard |
+|---|---|
+| `availability` | No neard, or no adapter: `unsupported`; adapters all off (`Powered`): `disabled`. Asked with `GetManagedObjects`, waited for |
+| `begin` | The first adapter that's on: `StartPollLoop("Initiator")`, then `didBecomeActive`. A tag already in the field is found as it is, since neard won't poll over one. One session at a time in the process: neard has one poll loop per adapter |
+| A tag | `InterfacesAdded` of `org.neard.Tag` under the adapter, then neard's own signal that it read the records, `org.neard.Tag.PropertyChanged("Records", …)`, which can come first; then `didDetect`, with the records as they are then. A tag with no NDEF gets no such signal, so it's found after a second without one. A kind not asked for is left out |
+| Polling | neard stops polling when it finds a tag, and doesn't start again, with a tag in the field or after one leaves, so `restartPolling`, and a tag left out, poll again once the field is empty |
+| `connect` | neard keeps a tag it found connected: the tag in the field |
+| `type` | `Protocol`: `ISO-DEP` `iso7816`, `MIFARE` `miFare` (`Jewel`, NFC Forum Type 1, is `unknown`, and also ISO 14443), `Felica` `feliCa`, `ISO-15693` `iso15693`; all `ndef` in an NDEF session |
+| `identifier` | `Uid`; empty in an NDEF session, as on iOS |
+| `queryNDEFStatus` | `ReadOnly`: `readOnly` or `readWrite`. neard doesn't say how much a tag holds, so the capacity is 0 |
+| `readNDEF` | The tag's records (below); nil for none |
+| `writeNDEF` | `Tag.Write(a{sv})`: one record's fields, or each record's under `Records`. neard reads the tag again after a write, and a read after it waits for that (or a second) |
+| `writeLock`, `transceive` | neard has no way to lock a tag or send it a raw command: `unsupported` (an NDEF session's `transceive` is `notAvailableInNDEFSession`) |
+| `invalidate` | `StopPollLoop`; the delegate told once, on the next turn |
+
+- **Records.** neard parses a tag's message itself and publishes each
+  record it knows as properties, not bytes, and writes only what it can
+  make from such properties. So reading gives text (re-encoded as UTF-8),
+  URIs, MIME types with their payload, Smart Posters (as an `Sp` record
+  holding the URI and the title) and Android application records
+  (`android.com:pkg`), and leaves out handovers. Writing takes text, URI
+  and MIME records, without identifiers, and refuses anything else, an
+  empty message, and the Wi-Fi type (`application/vnd.wfa.wsc`), for which
+  neard makes a record of its own, with `invalidParameter`.
+- **Operations** run one at a time per tag, in order, each with one
+  callback on the next turn. A tag leaving (`InterfacesRemoved`) fails what
+  waits with `tagConnectionLost`; one from an earlier detection, or not
+  connected, is `tagNotConnected`.
+- **Errors.** neard answers most failures as `org.neard.Error.Failed`
+  with `strerror`'s text: busy is `systemBusy`, no such device `disabled`.
+  A write it can't make or that fails is `InvalidArguments`, so a failed
+  write is `unknown`, and logged; `PermissionDenied` is `tagReadOnly`,
+  `InProgress` `systemBusy`. The adapter turned off or gone, or the bus
+  closing, ends the session.
+- **`nfc`** asks for nothing: NFC has no prompt on any platform.
+- **Not yet**: raw commands. The kernel has them (`AF_NFC` raw sockets),
+  but neard holds the tag it found, so they'd need neard stopped or a
+  version of it that passes them on. Card emulation (neard's
+  `StartEmulation`) and peer-to-peer aren't part of the contract. It
+  hasn't run against real neard and an adapter.
+
+## 15. Testing
 
 - `LinuxUI`: DarwinUI's tests, on Cacao (§5).
 - `LinuxBluetooth`: the contract against a fake `BlueZBus` that plays
@@ -712,6 +766,18 @@ polls. Reading them needs no permission.
   kept; the files the app is opened with. The packager accepts the
   contracts with `userFiles`, and writes `MimeType=`. It hasn't run
   against a real portal.
+- `LinuxNFC`: the contract against a fake `NeardBus` that plays neard's
+  adapter, tags, records and signals, and answers on the main loop:
+  availability; a session that finds a tag, reads it and ends; the
+  records' signal before the tag; a tag without NDEF; kinds not asked for,
+  and polling again once the field is empty; an NDEF session; a tag already
+  in the field; sessions that can't begin, one at a time, and invalidating
+  before neard answers; the adapter turned off or gone, and the bus
+  closing; operations before a connection, and a tag leaving; writing, and
+  reading after neard read the tag again, or gave up; what neard can't
+  write, a read-only tag, locking and raw commands. neard's records as NDEF
+  and back, and the NDEF encoding. The packager accepts the contracts with
+  `nfc`.
 - End to end: AppRuntime's `ExampleUI`, `ExampleGL` and `ExampleModel`
   bundles, their `linux-arm64` `libapp.so` loaded by `linux-app-host` and
   run headless with SDL's `offscreen` driver, each first frame saved with
@@ -724,7 +790,7 @@ polls. Reading them needs no permission.
   `bluetoothd`. Real GeoClue needs a session with an agent, or the app
   allowed in `geoclue.conf`.
 
-## 15. Phases
+## 16. Phases
 
 1. **Host runtime and player**: `LinuxHost`, `LinuxUI`, `LinuxBluetooth`,
    `LinuxHostApp`; `ExampleUI` runs in Docker.
@@ -732,14 +798,15 @@ polls. Reading them needs no permission.
    thinned to the target's `libapp.so`, a `.desktop` file and icon, for
    the runner; later Flatpak and AppImage, whose manifests carry the
    capabilities (`--system-talk-name=org.bluez` for `bluetooth`).
-3. **More contracts**: NFC (neard). Formatting and HTTP are done:
-   AppRuntime's `RuntimeFormatting` and `RuntimeNetworking` (§3), and so
-   are the device (§10), location (§11), over GeoClue2, documents (§12),
-   over the desktop portal, and motion (§13), over IIO.
+3. **More contracts**: formatting and HTTP are done: AppRuntime's
+   `RuntimeFormatting` and `RuntimeNetworking` (§3), and so are the
+   device (§10), location (§11), over GeoClue2, documents (§12), over
+   the desktop portal, motion (§13), over IIO, and NFC (§14), over
+   neard.
 4. **Player**: what DarwinUI and Cacao add: Cacao's AT-SPI bridge, input
    replay for end-to-end tests.
 
-## 16. Open questions
+## 17. Open questions
 
 - **Permissions.** Desktop Linux has no prompts for Bluetooth; Flatpak's
   portals cover location and the camera. `Permissions.request` answers from

@@ -70,6 +70,7 @@ let package = Package(
         .library(name: "LinuxDBus", targets: ["LinuxDBus"]),
         .library(name: "LinuxLocation", targets: ["LinuxLocation"]),
         .library(name: "LinuxMotion", targets: ["LinuxMotion"]),
+        .library(name: "LinuxNFC", targets: ["LinuxNFC"]),
         .library(name: "LinuxHostApp", targets: ["LinuxHostApp"]),
         .executable(name: "linux-app-host", targets: ["LinuxAppHost"]),
         .executable(name: "linux-app", targets: ["LinuxAppTool"]),
@@ -210,6 +211,16 @@ let package = Package(
             swiftSettings: host
         ),
 
+        // MARK: - NFC
+
+        // neard on the system bus.
+        .target(
+            name: "LinuxNFC",
+            dependencies: ["LinuxHost", "LinuxDBus", runtime("DynamicNFC"), runtime("DynamicRuntime"), runtime("RuntimeNative"),
+                           .product(name: "DBus", package: "DBus")],
+            swiftSettings: host
+        ),
+
         // MARK: - App
 
         // What the runner's process supplies that libc may not
@@ -217,7 +228,7 @@ let package = Package(
         .target(name: "CLinuxHost"),
         .target(
             name: "LinuxHostApp",
-            dependencies: ["LinuxHost", "LinuxUI", "LinuxBluetooth", "LinuxGraphics", "LinuxWebKit", "LinuxCoreModel", "LinuxDevice", "LinuxLocation", "LinuxDocuments", "LinuxMotion", "CLinuxHost", runtime("CRuntime"), runtime("RuntimeFormatting"), runtime("RuntimeNetworking"),
+            dependencies: ["LinuxHost", "LinuxUI", "LinuxBluetooth", "LinuxGraphics", "LinuxWebKit", "LinuxCoreModel", "LinuxDevice", "LinuxLocation", "LinuxDocuments", "LinuxMotion", "LinuxNFC", "CLinuxHost", runtime("CRuntime"), runtime("RuntimeFormatting"), runtime("RuntimeNetworking"),
                            runtime("DynamicGraphics"), .product(name: "CacaoSDL", package: "Cacao")],
             swiftSettings: host
         ),
@@ -241,7 +252,7 @@ let package = Package(
         // doesn't build Cacao.
         .target(
             name: "LinuxPackager",
-            dependencies: ["LinuxHost", "LinuxBluetooth", "LinuxGraphics", "LinuxWebKit", "LinuxCoreModel", "LinuxDevice", "LinuxLocation", "LinuxDocuments", "LinuxMotion", runtime("RuntimeFormatting"), runtime("RuntimeNetworking"), runtime("DynamicUI"),
+            dependencies: ["LinuxHost", "LinuxBluetooth", "LinuxGraphics", "LinuxWebKit", "LinuxCoreModel", "LinuxDevice", "LinuxLocation", "LinuxDocuments", "LinuxMotion", "LinuxNFC", runtime("RuntimeFormatting"), runtime("RuntimeNetworking"), runtime("DynamicUI"),
                            .product(name: "Crypto", package: "swift-crypto")]
         ),
         .executableTarget(
@@ -270,6 +281,8 @@ let package = Package(
                     swiftSettings: host),
         .testTarget(name: "LinuxDBusTests", dependencies: ["LinuxDBus", .product(name: "DBus", package: "DBus")], swiftSettings: host),
         .testTarget(name: "LinuxLocationTests", dependencies: ["LinuxLocation", "LinuxDBus", runtime("DynamicLocation"), .product(name: "DBus", package: "DBus")],
+                    swiftSettings: host),
+        .testTarget(name: "LinuxNFCTests", dependencies: ["LinuxNFC", "LinuxDBus", runtime("DynamicNFC"), .product(name: "DBus", package: "DBus")],
                     swiftSettings: host),
         .testTarget(name: "LinuxDocumentsTests", dependencies: ["LinuxDocuments", "LinuxDBus", runtime("DynamicDocuments"), runtime("RuntimeDocuments"),
                                                             runtime("DynamicFiles"), runtime("RuntimeHost"), runtime("RuntimeNative"),
