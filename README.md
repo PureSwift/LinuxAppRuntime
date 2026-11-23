@@ -60,12 +60,12 @@ added to its database between launches:
 | `LinuxWebKit` | `WebContent`: WPE WebKit pages, loaded at run time, drawn into shared memory and shown by the player's `WebView` view ([plan](Documentation/Plan.md) §8) |
 | `LinuxCoreModel` | `LinuxModelStore`: the app's CoreModel stores in SQLite, through AppRuntime's `HostModelStore` and CoreModel-SQLite ([plan](Documentation/Plan.md) §9) |
 | `LinuxDevice` | `Device`: the machine, its battery, power mode and heat, from `/etc`, DMI, the device tree and sysfs, and its orientation and proximity from iio-sensor-proxy ([plan](Documentation/Plan.md) §10) |
-| `LinuxDBus` | `Bus`: the system and session buses for the modules that talk to system services, over PureSwift/DBus, with calls, properties and signals delivered on the main loop ([plan](Documentation/Plan.md) §11.1) |
+| `LinuxDBus` | `Bus`: the system and session buses for the modules that talk to system services, over PureSwift/DBus, with calls, properties and signals delivered on the main loop, and objects the host serves ([plan](Documentation/Plan.md) §11.1) |
 | `LinuxLocation` | `LocationManager`: the device's location from GeoClue 2 on the system bus, which its agent authorizes by the app's desktop ID; no heading ([plan](Documentation/Plan.md) §11) |
 | `LinuxDocuments` | `Documents`: AppRuntime's `HostDocuments` with the desktop portal's file chooser on the session bus, for opening, folders and saving, and bookmarks in the app's data ([plan](Documentation/Plan.md) §12) |
 | `LinuxMotion` | Motion: the accelerometer, gyroscope, magnetometer and barometer from the kernel's IIO sensors in sysfs, device motion fused from them, and a pedometer and activity recognizer that are unavailable ([plan](Documentation/Plan.md) §13) |
 | `LinuxNFC` | `NFCReader`, `NFCTag`, `NDEFMessage`, `NDEFRecord`: reading and writing NDEF tags through neard on the system bus; no raw commands or locking ([plan](Documentation/Plan.md) §14) |
-| `LinuxMedia` | `MediaPlayback`: songs and videos through GStreamer's `playbin`, opened at run time, from files, bytes or URLs; the player's `VideoPlayer` view shows the pictures, with play, pause and a scrubber ([plan](Documentation/Plan.md) §15) |
+| `LinuxMedia` | `MediaPlayback`: songs and videos through GStreamer's `playbin`, opened at run time, from files, bytes or URLs; the player's `VideoPlayer` view shows the pictures, with play, pause and a scrubber; what's playing is an MPRIS player on the session bus, for the shell's media controls ([plan](Documentation/Plan.md) §15) |
 | `LinuxHostApp`, `linux-app-host` | The app's `main`: the host, and Cacao's window and loop. It also registers AppRuntime's `RuntimeFormatting`, dates and numbers over Swift Foundation, and `RuntimeNetworking`, HTTP over `URLSession` and libcurl ([plan](Documentation/Plan.md) §3) |
 | `LinuxPackager`, `linux-app` | The packager: validation, thinning a bundle to one target, the install tree, PortMaster ports |
 
