@@ -100,12 +100,12 @@ timers for `schedule`.
 | `LinuxWebKit` | `WebContent` over WPE WebKit, loaded at run time; the player's `WebView` view shows it (§8) |
 | `LinuxCoreModel` | `LinuxModelStore`: the model store over CoreModel-SQLite, through AppRuntime's `HostModelStore` (§9) |
 | `LinuxDevice` | `Device` from `/etc`, DMI, the device tree, and power and heat in sysfs; orientation and proximity from iio-sensor-proxy (§10) |
-| `LinuxDBus` | `Bus`: the system and session buses, for the modules that talk to system services: method calls, properties and signals by match rule, delivered on the main loop (§11.1) |
+| `LinuxDBus` | `Bus`: the system and session buses, for the modules that talk to system services: method calls, properties and signals by match rule, delivered on the main loop; and objects the host serves, with the names it owns (§11.1) |
 | `LinuxLocation` | `LocationManager`, `Location` and `Heading` over GeoClue 2 (§11) |
 | `LinuxDocuments` | `Documents`: AppRuntime's `HostDocuments` with the desktop portal's file chooser, and bookmarks (§12) |
 | `LinuxMotion` | `MotionManager` and `Altimeter` over the kernel's IIO sensors in sysfs, and an unavailable `Pedometer` and `ActivityRecognizer` (§13) |
 | `LinuxNFC` | `NFCReader`, `NFCTag`, `NDEFMessage` and `NDEFRecord` over neard (§14) |
-| `LinuxMedia` | `MediaPlayback` over GStreamer's `playbin`, loaded at run time; the player's `VideoPlayer` view shows its pictures (§15) |
+| `LinuxMedia` | `MediaPlayback` over GStreamer's `playbin`, loaded at run time; the player's `VideoPlayer` view shows its pictures, and MPRIS what's playing (§15) |
 | `LinuxHostApp` | `main`: reads the app's keys, starts the host, and runs Cacao's SDL loop with one window showing the guest's first renderer |
 | `LinuxPackager`, `linux-app` | The packager (§17, [Packager.md](Packager.md)) |
 
@@ -515,8 +515,8 @@ of its own, made when it first needs one:
 ### 11.1 D-Bus
 
 `LinuxDBus` is what Bluetooth, Location, the device's orientation and
-proximity (iio-sensor-proxy), NFC (neard) and the desktop portal
-share. `Bus.system`
+proximity (iio-sensor-proxy), NFC (neard), the desktop portal and what's
+playing (MPRIS) share. `Bus.system`
 and `Bus.session` are one connection each per process, made on first use
 through PureSwift/DBus, which speaks D-Bus in Swift, without libdbus; its
 values are `DBusMessageArgument`s, whose arrays and dictionaries carry
@@ -543,6 +543,15 @@ their element types.
   `org.freedesktop.DBus.Local.Disconnected` signal; the next request
   connects again, and the rules are added again. Without a bus, calls fail
   with `NoServer`.
+- **Serving**, for MPRIS: `export` serves an object's `BusInterface`s at a
+  path, through PureSwift/DBus's object server, which answers
+  `Introspectable`, `Peer` and `Properties` for it. A method call or a
+  property read or write comes in on the connection's threads, is posted to
+  the main loop, and its answer goes back, so handlers run on the main
+  thread like everything else. `requestName` asks for a well-known name
+  without queueing, and `releaseName` gives it up; `emit` and
+  `emitPropertiesChanged` send signals. Objects and names are served and
+  asked for again on a new connection.
 
 ## 12. Documents
 
@@ -746,11 +755,30 @@ gives it a player per `MediaPlayback`, `GStreamerEngine`.
   no `VideoPlayer` case yet, so `HostNodeViews` draws it; DarwinUI's later
   revisions draw `GLSurface`, `WebView` and `VideoPlayer` through
   providers, which a sync will have to set instead.
-- **`audio`** asks for nothing, as everywhere.
+- **What's playing** (AppRuntime's `NowPlaying.md`) is an MPRIS player on
+  the session bus, `org.mpris.MediaPlayer2.<app id>` (characters a bus
+  name can't have become `_`), which the shell shows with its media
+  controls and media keys. The name is owned while the app describes a
+  player and given up when it stops; the object is served at
+  `/org/mpris/MediaPlayer2`:
+
+| | MPRIS |
+|---|---|
+| `org.mpris.MediaPlayer2` | `Identity`, the app's name; `DesktopEntry`, its identifier, as the packager names the entry. No `Raise`, `Quit` or track list |
+| `Metadata` | `xesam:title`, `xesam:artist`, `xesam:album`, `mpris:length` when the duration is known, `mpris:trackid` (one per player), `mpris:artUrl`: an artwork file's URL, or bytes written to a temporary file |
+| `PlaybackStatus`, `Rate`, `Position` | Playing or Paused, from `HostMediaPlayback`'s reports; `Position` worked out when it's read from the last report and the rate, as the contract has the guest do. `Rate` is the last one played at, never 0 |
+| Buttons | `Play`, `Pause`, `PlayPause`, `Stop` (a pause), `Seek` and `SetPosition` (for this track) are `HostMediaPlayback.remote`'s, answered without the guest; `Next` and `Previous` go to the guest when it offered them (`CanGoNext`, `CanGoPrevious`). `OpenUri` is `NotSupported` |
+| Changes | `PropertiesChanged` at each report, with what changed; `Seeked` when the position jumps |
+
+- **`audio`** asks for nothing, as everywhere. The desktop doesn't send an
+  app to the background, so a player plays on with its window hidden;
+  `.audio(background: true)` (`RTCapabilityOptions.audio.background`)
+  makes `canPlayInBackground` say so.
 - **Not yet**:
-  - What's playing outside the window (NowPlaying): MPRIS on the session
-    bus. The desktop doesn't send an app to the background, so a player
-    plays on with its window hidden, and `setPlaysInBackground` is refused.
+  - `Volume` is 1 and read-only from the shell, and there's no
+    `LoopStatus` or `Shuffle`.
+  - Artwork as a file is named by its path, which a shell in another
+    sandbox may not read.
   - Interruptions and unplugged headphones: the sound server doesn't tell
     a client, short of PulseAudio's corking.
   - Hardware decoding: GStreamer's VA-API and V4L2 decoders would need the
@@ -808,7 +836,9 @@ gives it a player per `MediaPlayback`, `GStreamerEngine`.
   and, where `dbus-daemon` is installed, a daemon of the test's own: calls
   waited for and on the main loop, properties, an error, a signal by match
   rule from another connection, and connecting again, with the rules, once
-  the daemon's gone and another is in its place.
+  the daemon's gone and another is in its place; an object served, its
+  methods, an error, its properties read and written, introspection, its
+  signals, and a name owned and given up.
 - `LinuxCoreModel`: where stores are; about 500 requests answered as
   CoreModel's in-memory store answers them; every value there and back;
   batches applied whole or not at all; a store kept between launches,
@@ -854,7 +884,11 @@ gives it a player per `MediaPlayback`, `GStreamerEngine`.
   file; what isn't media, a missing file, and a URL without `network`; a
   video's size, its preroll's picture, pictures while playing and after a
   seek; what the registry plays. GStreamer's errors and MIME types as the
-  contract has them. `VideoPlayer` nodes lay out in `LinuxUI`'s tests,
+  contract has them. What's playing as an MPRIS player, against a bus
+  daemon of the test's own with another connection as the shell: the name,
+  the properties and metadata, the position moving on, play, seeking with
+  `Seeked`, a seek for another track ignored, next to the guest, a pause
+  that's the user's, `OpenUri` refused, and the name given up. `VideoPlayer` nodes lay out in `LinuxUI`'s tests,
   with and without controls. The packager accepts the contracts with
   `audio`.
 - End to end: AppRuntime's `ExampleUI`, `ExampleGL` and `ExampleModel`
