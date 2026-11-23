@@ -320,6 +320,15 @@ host adds:
 - **Frames** come from WPEBackend-fdo's SHM mode as premultiplied BGRA, and
   go to the page's Cacao `ExternalSurface` as they are: no conversion, one
   copy. WebKit draws on the CPU; there's no GL.
+- **Scripts and schemes an app talks to its pages with** (`features()`
+  says `userScripts`, `scriptMessages`, `messageReplies` and `urlSchemes`)
+  are `WPEWebContent`'s: user scripts in its `WebKitUserContentManager`,
+  message handlers with and without replies, and schemes registered once
+  per process, from `make(_:dataStore:options:schemes:)`; one WebKit
+  loads itself, such as `https`, is left to it and logged. Replies and
+  requests are numbered for the guest. WPE doesn't say when a page stops
+  wanting a request, so `stopURLSchemeTask` isn't sent. Releasing the page
+  rejects the replies it owes and fails its requests.
 - **The view** (`Sources/LinuxUI/HostWebView.swift`) is CacaoWebKit's
   `WebView(content:)` over the page its node names:
   - it attaches the page at its size in points and the display's scale

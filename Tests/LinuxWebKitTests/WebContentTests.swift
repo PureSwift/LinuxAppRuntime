@@ -47,6 +47,22 @@ final class RecordingDelegate: WebContentDelegate {
         scripts[request] = (result, error)
     }
 
+    /// Answers each message that waits for a reply, by its number.
+    var onMessage: ((_ content: WebContent, _ name: String, _ body: String?, _ reply: Int32) -> Void)?
+
+    /// Answers each request in the app's schemes.
+    var onTask: ((_ content: WebContent, _ task: Int32, _ url: String, _ method: String, _ headers: [String], _ body: [UInt8]?) -> Void)?
+
+    func didReceiveMessage(_ content: WebContent, name: String, body: String?, reply: Int32) {
+        events.append("message \(name) \(body ?? "undefined")\(reply == 0 ? "" : " reply")")
+        onMessage?(content, name, body, reply)
+    }
+
+    func startURLSchemeTask(_ content: WebContent, task: Int32, url: String, method: String, headers: [String], body: [UInt8]?) {
+        events.append("task \(task) \(method) \(url)")
+        onTask?(content, task, url, method, headers, body)
+    }
+
     var finished: Bool { events.contains("finish") }
 
     var title: String? {
@@ -306,5 +322,87 @@ func wait(_ seconds: Double = 20, until condition: () -> Bool) -> Bool {
             #expect(LinuxWebContent.page(identifier: id) == nil)
         }
     }
-}
 
+    // MARK: Scripts and schemes
+
+    @Test(.enabled(if: WebContentTests.hasWPE)) func saysWhatItDoes() throws {
+        let features = WebFeatures(rawValue: try WebThread.shared.run { LinuxWebContent.features() })
+        #expect(features == [.userScripts, .scriptMessages, .messageReplies, .urlSchemes])
+    }
+
+    @Test(.enabled(if: WebContentTests.hasWPE)) func runsUserScriptsAndPassesOnMessages() throws {
+        try WebThread.shared.run {
+            let delegate = RecordingDelegate()
+            delegate.onMessage = { content, name, body, reply in
+                guard reply != 0 else { return }
+                if body == "0" {
+                    content.replyToMessage(reply, result: nil, error: "no zeros")
+                } else {
+                    content.replyToMessage(reply, result: #"{"echo":\#(body ?? "null")}"#, error: nil)
+                }
+            }
+            let page = LinuxWebContent.make(delegate, dataStore: 0, options: 0, schemes: [])
+            page.addUserScript("window.webkit.messageHandlers.note.postMessage({ early: true })", atDocumentStart: true, mainFrameOnly: true)
+            page.addMessageHandler("note", replies: false)
+            page.addMessageHandler("ask", replies: true)
+            page.loadHTML("""
+                <script>
+                const ask = (n) => window.webkit.messageHandlers.ask.postMessage(n)
+                    .then(v => JSON.stringify(v), e => 'rejected ' + e.message);
+                Promise.all([ask(5), ask(0)]).then(r => { document.title = r.join(' | '); });
+                </script>
+                """, baseURL: "https://example.invalid/")
+            #expect(wait { delegate.title == #"{"echo":5} | rejected no zeros"# }, "\(delegate.events)")
+            #expect(delegate.events.contains(#"message note {"early":true}"#), "the user script ran before the page's own")
+            #expect(delegate.events.contains("message ask 5 reply"))
+
+            // Answering again, or a number never given, does nothing.
+            page.replyToMessage(1, result: "1", error: nil)
+            page.replyToMessage(99, result: "1", error: nil)
+
+            page.removeMessageHandler("ask")
+            page.removeAllUserScripts()
+            delegate.events.removeAll()
+            page.loadHTML("<script>document.title = String(window.webkit.messageHandlers.ask === undefined)</script>", baseURL: nil)
+            #expect(wait { delegate.finished && delegate.title == "true" })
+            #expect(!delegate.events.contains { $0.hasPrefix("message") }, "no user script, no handler")
+            withExtendedLifetime(page) { }
+        }
+    }
+
+    @Test(.enabled(if: WebContentTests.hasWPE)) func servesAPageFromAnAppScheme() throws {
+        try WebThread.shared.run {
+            let delegate = RecordingDelegate()
+            delegate.onTask = { content, task, url, method, headers, body in
+                switch url {
+                case "test-linux-app:/index.html":
+                    content.finishURLSchemeTask(task, status: 200, contentType: "text/html", headers: [],
+                                                body: Array("<title>App</title><script>fetch('test-linux-app:/data', { method: 'POST', body: 'hi' }).then(r => r.text().then(t => { document.title = r.status + ' ' + r.headers.get('x-answer') + ' ' + t; }))</script>".utf8))
+                case "test-linux-app:/data":
+                    #expect(method == "POST")
+                    #expect(body == Array("hi".utf8))
+                    content.finishURLSchemeTask(task, status: 201, contentType: "text/plain",
+                                                headers: ["X-Answer", "yes", "Access-Control-Allow-Origin", "*", "Access-Control-Expose-Headers", "X-Answer"],
+                                                body: Array("stored".utf8))
+                default:
+                    content.failURLSchemeTask(task, error: WebError.Code.notPermitted.rawValue, message: "not for you")
+                }
+            }
+            let page = LinuxWebContent.make(delegate, dataStore: 0, options: 0, schemes: ["Test-Linux-App", "https"])
+            page.load("test-linux-app:/index.html")
+            #expect(wait { delegate.title == "201 yes stored" }, "\(delegate.events)")
+            #expect(delegate.events.contains("url test-linux-app:/index.html"))
+            #expect(delegate.events.contains("task 1 GET test-linux-app:/index.html"))
+            #expect(delegate.events.contains("task 2 POST test-linux-app:/data"))
+
+            delegate.events.removeAll()
+            page.load("test-linux-app:/forbidden")
+            #expect(wait { delegate.events.contains { $0.hasPrefix("fail") } }, "\(delegate.events)")
+            #expect(delegate.events.contains("fail \(WebError.Code.notPermitted.rawValue)"))
+            // A task answered already, or never asked, is let be.
+            page.finishURLSchemeTask(1, status: 200, contentType: nil, headers: [], body: [])
+            page.failURLSchemeTask(99, error: 0, message: "")
+            withExtendedLifetime(page) { }
+        }
+    }
+}
