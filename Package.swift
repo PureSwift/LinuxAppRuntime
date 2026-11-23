@@ -224,11 +224,12 @@ let package = Package(
 
         // MARK: - Media
 
-        // GStreamer's playbin, opened at run time.
+        // GStreamer's playbin, opened at run time, and MPRIS on the session
+        // bus.
         .target(
             name: "LinuxMedia",
-            dependencies: ["LinuxHost", runtime("DynamicMedia"), runtime("DynamicRuntime"), runtime("RuntimeMedia"), runtime("RuntimeHost"),
-                           runtime("RuntimeCore"), runtime("RuntimeNative")],
+            dependencies: ["LinuxHost", "LinuxDBus", runtime("DynamicMedia"), runtime("DynamicRuntime"), runtime("RuntimeMedia"),
+                           runtime("RuntimeHost"), runtime("RuntimeCore"), runtime("RuntimeNative"), .product(name: "DBus", package: "DBus")],
             swiftSettings: host
         ),
 
@@ -299,7 +300,8 @@ let package = Package(
                                                             runtime("DynamicFiles"), runtime("RuntimeHost"), runtime("RuntimeNative"),
                                                             .product(name: "DBus", package: "DBus")],
                     swiftSettings: host),
-        .testTarget(name: "LinuxMediaTests", dependencies: ["LinuxMedia", runtime("DynamicMedia"), runtime("RuntimeMedia"), runtime("RuntimeHost")],
+        .testTarget(name: "LinuxMediaTests", dependencies: ["LinuxMedia", "LinuxDBus", runtime("DynamicMedia"), runtime("RuntimeMedia"),
+                                                        runtime("RuntimeHost"), .product(name: "DBus", package: "DBus")],
                     swiftSettings: host),
         .testTarget(name: "LinuxMotionTests", dependencies: ["LinuxMotion", runtime("DynamicMotion")], swiftSettings: host),
         .testTarget(name: "LinuxWebKitTests", dependencies: ["LinuxWebKit", runtime("DynamicWebKit")], swiftSettings: host),
