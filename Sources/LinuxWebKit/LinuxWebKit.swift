@@ -2,9 +2,11 @@ import DynamicRuntime
 import DynamicWebKit
 import LinuxHost
 import RuntimeABI
+import WPEWebKit
 
 /// The web view contracts (`WebKit.md`, `Plan.md` §8): pages in WPE WebKit,
-/// shown by the player's `WebView` view. Main loop only.
+/// through PureSwift/WebKit, shown by the player's `WebView` view. Main
+/// loop only.
 public enum LinuxWebKit: HostModule {
 
     public static var contracts: [ContractDescriptor] {
@@ -19,16 +21,14 @@ public enum LinuxWebKit: HostModule {
     /// Whether WPE WebKit loads. Without it a page loads nothing, and says
     /// so.
     public static var isAvailable: Bool {
-        WPE.shared != nil
+        WPEEngine.isAvailable
     }
 
     // MARK: The network
 
     /// In place of the app's capabilities, for tests: whether pages may
     /// reach the network.
-    nonisolated(unsafe) public static var networkOverride: Bool? = nil {
-        didSet { appliedNetwork = nil }
-    }
+    nonisolated(unsafe) public static var networkOverride: Bool? = nil
 
     /// Whether pages may reach the network: the app declares `network`.
     /// Without it, remote loads are refused, and the rest go through a
@@ -37,49 +37,37 @@ public enum LinuxWebKit: HostModule {
         networkOverride ?? HostPermissions.declared.contains(.network)
     }
 
-    nonisolated(unsafe) private static var appliedNetwork: Bool?
-
-    /// Sets WebKit's proxy to match `hasNetwork`, once per change.
+    /// Gives the engine the app's network, which it applies once per
+    /// change.
     static func applyNetworkPolicy() {
-        guard let wpe = WPE.shared else { return }
-        let allowed: Bool = hasNetwork
-        guard appliedNetwork != allowed else { return }
-        appliedNetwork = allowed
-        if allowed {
-            if let session = wpe.networkSessionGetDefault() {
-                wpe.networkSessionSetProxySettings(session, 0, nil)    // the system's proxy
-            }
-        } else {
-            wpe.blockNetwork()
+        WPEEngine.isNetworkAllowed = hasNetwork
+    }
+
+    // MARK: The engine's loop
+
+    nonisolated(unsafe) private static var isPrepared = false
+
+    /// Before the first page: the engine logs to the host's log, and its
+    /// loop runs on the main loop, which it wakes when its pages have work.
+    static func prepare() {
+        applyNetworkPolicy()
+        guard !isPrepared else { return }
+        isPrepared = true
+        WPEEngine.logger = { HostLog.warning("web: \($0)") }
+        WPEEngine.onReady = { MainLoop.shared.post { WPEEngine.pump() } }
+    }
+
+    /// Runs the engine's loop on the main loop's next turn, after the guest's
+    /// call that set it off has returned, so the guest doesn't hear from
+    /// its pages while it's calling them.
+    static func pump() {
+        guard !isPumpPosted else { return }
+        isPumpPosted = true
+        MainLoop.shared.post {
+            isPumpPosted = false
+            WPEEngine.pump()
         }
     }
 
-    // MARK: GLib's main context
-
-    /// How often the main loop runs GLib's context while there are pages.
-    static let interval: Int64 = 8_000_000
-
-    nonisolated(unsafe) private static var timer: MainLoop.TimerToken?
-
-    /// Runs GLib's context on the main loop while any page is alive.
-    static func pagesChanged() {
-        if LinuxWebContent.count == 0 {
-            if let timer {
-                MainLoop.shared.cancel(timer)
-                self.timer = nil
-            }
-        } else if timer == nil {
-            schedule()
-        }
-    }
-
-    private static func schedule() {
-        timer = MainLoop.shared.schedule(after: interval) {
-            timer = nil
-            WPE.shared?.dispatch()
-            if LinuxWebContent.count > 0 {
-                schedule()
-            }
-        }
-    }
+    nonisolated(unsafe) private static var isPumpPosted = false
 }
