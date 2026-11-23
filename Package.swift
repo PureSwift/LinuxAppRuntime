@@ -12,7 +12,8 @@ import PackageDescription
 /// The environment:
 ///
 /// - `APPRUNTIME_PATH`: a local AppRuntime checkout instead of GitHub;
-///   `CACAO_PATH` likewise for PureSwift/Cacao.
+///   `CACAO_PATH` likewise for PureSwift/Cacao, and `WEBKIT_PATH` for
+///   PureSwift/WebKit.
 let environment = ProcessInfo.processInfo.environment
 
 let appRuntime: Package.Dependency = {
@@ -31,6 +32,15 @@ let cacao: Package.Dependency = {
     return .package(url: "https://github.com/PureSwift/Cacao.git", branch: "develop")
 }()
 
+/// PureSwift/WebKit: WPE WebKit's pages, and the `WebView` that shows them
+/// in Cacao. `WEBKIT_PATH` points at a local checkout.
+let webKit: Package.Dependency = {
+    if let path = environment["WEBKIT_PATH"] {
+        return .package(name: "WebKit", path: path)
+    }
+    return .package(url: "https://github.com/PureSwift/WebKit.git", branch: "master")
+}()
+
 /// The player is DarwinAppRuntime's SwiftUI renderer: on Linux its
 /// `import SwiftUI` and `import Combine` are Cacao's modules of those names.
 #if os(Linux)
@@ -38,6 +48,7 @@ let swiftUI: [Target.Dependency] = [
     .product(name: "SwiftUI", package: "Cacao"),
     .product(name: "Combine", package: "Cacao"),
     .product(name: "Cacao", package: "Cacao"),
+    .product(name: "CacaoWebKit", package: "WebKit"),
 ]
 #else
 let swiftUI: [Target.Dependency] = []
@@ -79,6 +90,7 @@ let package = Package(
     dependencies: [
         appRuntime,
         cacao,
+        webKit,
         // D-Bus, in Swift without libdbus, which Bluetooth talks to BlueZ
         // over, and Location to GeoClue; it has no releases.
         .package(url: "https://github.com/PureSwift/DBus.git", revision: "d34567d64bb553a35e5b263f344c6963a5170ca3"),
@@ -137,10 +149,12 @@ let package = Package(
 
         // MARK: - Web views
 
-        // WPE WebKit, loaded at run time: the host links no WebKit.
+        // WPE WebKit through PureSwift/WebKit, which loads it at run time:
+        // the host links no WebKit.
         .target(
             name: "LinuxWebKit",
-            dependencies: ["LinuxHost", runtime("DynamicWebKit"), runtime("DynamicRuntime"), runtime("RuntimeABI")],
+            dependencies: ["LinuxHost", runtime("DynamicWebKit"), runtime("DynamicRuntime"), runtime("RuntimeABI"),
+                           .product(name: "WPEWebKit", package: "WebKit")],
             swiftSettings: host
         ),
 
@@ -277,7 +291,8 @@ let package = Package(
                     swiftSettings: host),
         .testTarget(
             name: "LinuxUITests",
-            dependencies: ["LinuxUI", runtime("DynamicUI"), runtime("DynamicRuntime"), .product(name: "Cacao", package: "Cacao")] + swiftUI,
+            dependencies: ["LinuxUI", "LinuxWebKit", runtime("DynamicUI"), runtime("DynamicRuntime"), runtime("DynamicWebKit"),
+                           .product(name: "Cacao", package: "Cacao")] + swiftUI,
             swiftSettings: host
         ),
         .testTarget(name: "LinuxBluetoothTests", dependencies: ["LinuxBluetooth"], swiftSettings: host),
@@ -302,7 +317,8 @@ let package = Package(
         .testTarget(name: "LinuxMediaTests", dependencies: ["LinuxMedia", runtime("DynamicMedia"), runtime("RuntimeMedia"), runtime("RuntimeHost")],
                     swiftSettings: host),
         .testTarget(name: "LinuxMotionTests", dependencies: ["LinuxMotion", runtime("DynamicMotion")], swiftSettings: host),
-        .testTarget(name: "LinuxWebKitTests", dependencies: ["LinuxWebKit", runtime("DynamicWebKit")], swiftSettings: host),
+        .testTarget(name: "LinuxWebKitTests", dependencies: ["LinuxWebKit", runtime("DynamicWebKit"), .product(name: "WPEWebKit", package: "WebKit")],
+                    swiftSettings: host),
         .testTarget(name: "LinuxPackagerTests", dependencies: ["LinuxPackager", "LinuxHostApp", runtime("RuntimeNetworking")]),
     ]
 )
