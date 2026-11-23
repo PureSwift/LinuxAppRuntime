@@ -57,7 +57,7 @@ added to its database between launches:
 | `LinuxUI` | The SwiftUI player: DarwinAppRuntime's `DarwinUI`, copied by `Scripts/sync-darwinui.sh`, over Cacao's `SwiftUI` |
 | `LinuxBluetooth` | `BluetoothCentral`, `BluetoothPeripheral`, `BluetoothService`, `BluetoothCharacteristic`, `BluetoothDescriptor` and `BluetoothAdvertisement` over BlueZ, through `LinuxDBus` |
 | `LinuxGraphics` | `Surface`: GLES 2.0 drawn in EGL pbuffers, loaded at run time, and read back into the player's `GLSurface` view ([plan](Documentation/Plan.md) §7) |
-| `LinuxWebKit` | `WebContent`: WPE WebKit pages, loaded at run time, drawn into shared memory and shown by the player's `WebView` view ([plan](Documentation/Plan.md) §8) |
+| `LinuxWebKit` | `WebContent`: WPE WebKit pages through [PureSwift/WebKit](https://github.com/PureSwift/WebKit), loaded at run time and shown by the player's `WebView` view, CacaoWebKit's ([plan](Documentation/Plan.md) §8) |
 | `LinuxCoreModel` | `LinuxModelStore`: the app's CoreModel stores in SQLite, through AppRuntime's `HostModelStore` and CoreModel-SQLite ([plan](Documentation/Plan.md) §9) |
 | `LinuxDevice` | `Device`: the machine, its battery, power mode and heat, from `/etc`, DMI, the device tree and sysfs, and its orientation and proximity from iio-sensor-proxy ([plan](Documentation/Plan.md) §10) |
 | `LinuxDBus` | `Bus`: the system and session buses for the modules that talk to system services, over PureSwift/DBus, with calls, properties and signals delivered on the main loop ([plan](Documentation/Plan.md) §11.1) |
@@ -101,9 +101,9 @@ with this checkout at `/src`:
 Scripts/docker.sh swift test --scratch-path .build/linux
 ```
 
-AppRuntime and Cacao (its `develop` branch) come from GitHub.
-`APPRUNTIME_PATH` and `CACAO_PATH` point at local checkouts instead, and
-`Scripts/docker.sh` mounts them.
+AppRuntime, Cacao (its `develop` branch) and PureSwift/WebKit come from
+GitHub. `APPRUNTIME_PATH`, `CACAO_PATH` and `WEBKIT_PATH` point at local
+checkouts instead, and `Scripts/docker.sh` mounts them.
 `Scripts/sync-darwinui.sh` updates the player from a DarwinAppRuntime
 checkout beside this one.
 

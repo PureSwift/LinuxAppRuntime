@@ -2,6 +2,7 @@ import DynamicWebKit
 import Foundation
 import LinuxHost
 import Testing
+import WPEWebKit
 @testable import LinuxWebKit
 
 /// Records what a page tells its delegate, and answers `shouldNavigate`.
@@ -101,7 +102,7 @@ func wait(_ seconds: Double = 20, until condition: () -> Bool) -> Bool {
         if Date() > deadline {
             return false
         }
-        WPE.shared?.dispatch()
+        WPEEngine.dispatch()
         usleep(5_000)
     }
     return true
@@ -111,7 +112,7 @@ func wait(_ seconds: Double = 20, until condition: () -> Bool) -> Bool {
 @Suite(.serialized) struct WebContentTests {
 
     static var hasWPE: Bool {
-        (try? WebThread.shared.run { WPE.shared != nil }) ?? false
+        (try? WebThread.shared.run { WPEEngine.isAvailable }) ?? false
     }
 
     // MARK: Without WPE
@@ -126,32 +127,8 @@ func wait(_ seconds: Double = 20, until condition: () -> Bool) -> Bool {
         #expect(LinuxWebContent.scheme(of: "/path:with/colon") == nil)
     }
 
-    @Test func errors() {
-        #expect(LinuxWebContent.errorCode(GError(domain: "WebKitNetworkError", code: 302, message: "")) == nil)
-        #expect(LinuxWebContent.errorCode(GError(domain: "WebKitPolicyError", code: 102, message: "")) == nil)
-        #expect(LinuxWebContent.errorCode(GError(domain: "WebKitNetworkError", code: 300, message: "")) == .network)
-        #expect(LinuxWebContent.errorCode(GError(domain: "WebKitNetworkError", code: 303, message: "")) == .badURL)
-        #expect(LinuxWebContent.errorCode(GError(domain: "g-resolver-error-quark", code: 1, message: "")) == .network)
-        #expect(LinuxWebContent.errorCode(GError(domain: "g-io-error-quark", code: 24, message: "")) == .timedOut)
-        #expect(LinuxWebContent.errorCode(GError(domain: "g-io-error-quark", code: 39, message: "")) == .network)
-        #expect(LinuxWebContent.errorCode(GError(domain: "g-tls-error-quark", code: 3, message: "")) == .security)
-        #expect(LinuxWebContent.errorCode(GError(domain: "other", code: 1, message: "")) == .unknown)
-    }
 
-    @Test func navigationKinds() {
-        #expect(LinuxWebContent.navigationKind(0) == .linkActivated)
-        #expect(LinuxWebContent.navigationKind(1) == .formSubmitted)
-        #expect(LinuxWebContent.navigationKind(4) == .formSubmitted)
-        #expect(LinuxWebContent.navigationKind(2) == .backForward)
-        #expect(LinuxWebContent.navigationKind(3) == .reload)
-        #expect(LinuxWebContent.navigationKind(5) == .other)
-    }
 
-    @Test func pixelsTurnRGBA() {
-        let bgra: [UInt8] = [10, 20, 30, 255, 1, 2, 3, 4, 99, 99, 99, 99]
-        let data = bgra.withUnsafeBytes { LinuxWebContent.rgba(fromBGRA: $0.baseAddress!, width: 2, height: 1, stride: 12) }
-        #expect(Array(data) == [30, 20, 10, 255, 3, 2, 1, 4])
-    }
 
     @Test func resourcesStayInTheBundle() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("web-resources-\(UUID())")
@@ -304,60 +281,30 @@ func wait(_ seconds: Double = 20, until condition: () -> Bool) -> Bool {
         }
     }
 
-    @Test(.enabled(if: WebContentTests.hasWPE)) func drawsFramesAndTakesInput() throws {
+    @Test(.enabled(if: WebContentTests.hasWPE)) func aWebViewFindsThePageItsNodeNames() throws {
         try WebThread.shared.run {
             let delegate = RecordingDelegate()
-            let page = LinuxWebContent.make(delegate)
-            var frame: WebFrame?
-            page.display = { frame = $0 }
-            page.attach(width: 160, height: 120, scale: 1)
-            page.loadHTML("""
-                <html><head><title>Start</title></head><body style="margin:0;background:#2a6">
-                <button style="position:absolute;left:0;top:0;width:80px;height:40px"
-                        onclick="document.title='Clicked'">Go</button>
-                <input style="position:absolute;left:0;top:60px;width:120px;height:30px"
-                       onkeydown="if (event.key == 'Enter') document.title = this.value">
-                </body></html>
-                """, baseURL: nil)
-            // The background, below the button, once drawn: #22aa66.
-            let offset = (100 * 160 + 140) * 4
+            var page: LinuxWebContent? = LinuxWebContent.make(delegate)
+            let id = try #require(page?.identifier())
+            #expect(LinuxWebContent.page(identifier: id) === page)
+            #expect(LinuxWebContent.page(identifier: id + 1000) == nil)
+            let content = try #require(page?.content)
+            // As the view attaches it: frames come at its size.
+            content.attach(width: 160, height: 120, scale: 1)
+            page?.loadHTML("<body style='margin: 0; background: #2a6'>", baseURL: nil)
+            #expect(wait { delegate.finished && content.surface.pixelSize == CGSize(width: 160, height: 120) })
+            // Premultiplied BGRA, rows top to bottom: #22aa66 below and right.
             func green() -> Bool {
-                guard let frame, frame.data.count == 160 * 120 * 4 else { return false }
-                return Array(frame.data[offset..<offset + 4]) == [0x22, 0xAA, 0x66, 0xFF]
+                guard let frame = content.surface.takeFrame(), frame.width == 160 else { return false }
+                let offset = 100 * frame.bytesPerRow + 140 * 4
+                return Array(frame.pixels[offset..<offset + 4]) == [0x66, 0xAA, 0x22, 0xFF]
             }
-            #expect(wait { delegate.finished && green() })
-            let pixels = try #require(frame)
-            #expect(pixels.width == 160 && pixels.height == 120 && pixels.scale == 1)
-
-            page.focus(true)
-            page.pointerMoved(x: 20, y: 20)
-            page.pointerButton(x: 20, y: 20, pressed: true)
-            page.pointerButton(x: 20, y: 20, pressed: false)
-            #expect(wait { delegate.title == "Clicked" })
-
-            page.pointerButton(x: 20, y: 75, pressed: true)
-            page.pointerButton(x: 20, y: 75, pressed: false)
-            for keysym: UInt32 in [0x68, 0x69, 0xFF0D] {    // h, i, Return
-                page.key(keysym: keysym, pressed: true, control: false, shift: false, alt: false, meta: false)
-                page.key(keysym: keysym, pressed: false, control: false, shift: false, alt: false, meta: false)
-            }
-            #expect(wait { delegate.title == "hi" })
-
-            // A new size: frames follow it.
-            page.resize(width: 100, height: 50, scale: 1)
-            #expect(wait { frame?.width == 100 && frame?.height == 50 })
-            page.detach()
-            #expect(!page.isAttached)
-            withExtendedLifetime(page) { }
+            #expect(wait { green() })
+            content.detach()
+            #expect(!content.isAttached)
+            page = nil
+            #expect(LinuxWebContent.page(identifier: id) == nil)
         }
     }
 }
 
-/// The event structs match libwpe's layouts.
-@Test func eventLayouts() {
-    #expect(MemoryLayout<PointerEvent>.size == 28)
-    #expect(MemoryLayout<AxisEvent>.size == 28)
-    #expect(MemoryLayout<KeyboardEvent>.stride == 20)
-    #expect(MemoryLayout<KeyboardEvent>.offset(of: \.pressed) == 12)
-    #expect(MemoryLayout<KeyboardEvent>.offset(of: \.modifiers) == 16)
-}

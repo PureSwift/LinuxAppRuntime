@@ -1,8 +1,8 @@
 #!/bin/sh
 # Runs a command in the Linux development image (Dockerfile), with this
 # checkout at /src and, if APPRUNTIME_PATH is set, that AppRuntime checkout at
-# /AppRuntime; likewise CACAO_PATH at /Cacao. Builds go to .build/linux, apart
-# from a Mac's .build.
+# /AppRuntime; likewise CACAO_PATH at /Cacao, and WEBKIT_PATH, PureSwift/WebKit,
+# at /WebKit. Builds go to .build/linux, apart from a Mac's .build.
 #
 #   Scripts/docker.sh swift test --scratch-path .build/linux
 #   APPRUNTIME_PATH=~/Developer/AppRuntime Scripts/docker.sh swift build --scratch-path .build/linux
@@ -25,6 +25,9 @@ if [ -n "$APPRUNTIME_PATH" ]; then
 fi
 if [ -n "$CACAO_PATH" ]; then
     set -- "$@" -v "$CACAO_PATH:/Cacao" -e CACAO_PATH=/Cacao
+fi
+if [ -n "$WEBKIT_PATH" ]; then
+    set -- "$@" -v "$WEBKIT_PATH:/WebKit" -e WEBKIT_PATH=/WebKit
 fi
 exec docker run --rm \
     -v "$root:/src" -w /src \
