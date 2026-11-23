@@ -57,6 +57,14 @@ public enum HostApp {
         HostNetworkingModule.log = { HostLog.error("networking: \($0)") }
     }
 
+    /// `.audio(background: true)`: `RTCapabilityOptions.audio.background`,
+    /// which the packager copies from the universal bundle as it is.
+    static func playsInBackground(_ info: [String: Any]) -> Bool {
+        let options = info["RTCapabilityOptions"] as? [String: Any]
+        let background = (options?["audio"] as? [String: Any])?["background"]
+        return background as? String == "true" || background as? Bool == true
+    }
+
     /// The window's title: the app's name.
     nonisolated(unsafe) static var title = ""
 
@@ -84,6 +92,7 @@ public enum HostApp {
             info = try AppInfo(propertyList: data)
             let dictionary = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
             executable = dictionary?["CFBundleExecutable"] as? String
+            LinuxMedia.allowsBackground = playsInBackground(dictionary ?? [:])
         } catch {
             fail("\(bundle): \(error)")
         }
