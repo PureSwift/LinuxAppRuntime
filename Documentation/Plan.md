@@ -52,7 +52,7 @@ contracts. D-Bus is PureSwift/DBus, in Swift, without libdbus.
 | arm64 and x86_64 Linux with glibc (Debian 13, Ubuntu 24.04+) | armv7, musl |
 | Native slices, loaded by the runner | `App.wasm`, in an engine in the runner; wasm2c for a target a bundle lacks, before it's installed |
 | Wayland and X11 through SDL3; a headless driver for tests | Multiple windows |
-| `Renderer`, `BluetoothCentral` and friends, GL surfaces, web views, files, settings, model stores, date and number formatting, HTTP, the device, location, documents, motion, NFC tags, the built-ins | |
+| `Renderer`, `BluetoothCentral` and friends, GL surfaces, web views, files, settings, model stores, date and number formatting, HTTP, the device, location, documents, motion, NFC tags, media players, the built-ins | |
 
 ## 2. Process model
 
@@ -105,8 +105,9 @@ timers for `schedule`.
 | `LinuxDocuments` | `Documents`: AppRuntime's `HostDocuments` with the desktop portal's file chooser, and bookmarks (§12) |
 | `LinuxMotion` | `MotionManager` and `Altimeter` over the kernel's IIO sensors in sysfs, and an unavailable `Pedometer` and `ActivityRecognizer` (§13) |
 | `LinuxNFC` | `NFCReader`, `NFCTag`, `NDEFMessage` and `NDEFRecord` over neard (§14) |
+| `LinuxMedia` | `MediaPlayback` over GStreamer's `playbin`, loaded at run time; the player's `VideoPlayer` view shows its pictures (§15) |
 | `LinuxHostApp` | `main`: reads the app's keys, starts the host, and runs Cacao's SDL loop with one window showing the guest's first renderer |
-| `LinuxPackager`, `linux-app` | The packager (§16, [Packager.md](Packager.md)) |
+| `LinuxPackager`, `linux-app` | The packager (§17, [Packager.md](Packager.md)) |
 
 The package depends on AppRuntime without its `GuestExports` trait, like
 DarwinAppRuntime, so the slice's `rt_dispatch` and `rt_finalize` are the
@@ -695,7 +696,74 @@ ISO 15693 protocol is `ISO-15693`, and there's no `TagFound` signal).
   `StartEmulation`) and peer-to-peer aren't part of the contract. It
   hasn't run against real neard and an adapter.
 
-## 15. Testing
+## 15. Media
+
+`LinuxMedia` is the media contracts (AppRuntime's `MediaPlayer.md`) over
+GStreamer, and the player draws `VideoPlayer` nodes. The contract is
+AppRuntime's `HostMediaPlayback`, which checks each source, finds files
+through `HostFiles` and keeps the rules every host shares; this module
+gives it a player per `MediaPlayback`, `GStreamerEngine`.
+
+- **No GStreamer at build time.** As WPE is (§8), the host opens
+  `libgstreamer-1.0`, `libgstapp-1.0`, GObject and GLib when the media
+  module registers, locally. Without them there are no players: every
+  load fails with `unavailable`, and `canPlay` says `no`. The development
+  image and CI install GStreamer's base and good plugins and libav's
+  decoders; a desktop has them, or its distro packages them.
+- **A `playbin` per player.** Its pictures go to a bin of `videoconvert`,
+  `videoscale` and an `appsink` that takes RGBA with square pixels and
+  keeps at most one picture, dropping older ones, so decoding never waits
+  for the host. Its sound goes to `autoaudiosink`, the desktop's sound
+  server, through `scaletempo`, so a rate other than 1 keeps the pitch.
+- **Polled, never called back.** While a player has a source, the main loop
+  takes the pipeline's bus messages every 10 ms, and the `appsink`'s latest
+  picture while a view shows the player. No GStreamer thread calls into the
+  host, so there are no signal handlers and nothing to hop threads.
+- **The contract** maps onto the pipeline:
+
+| | GStreamer |
+|---|---|
+| A load | The `uri` (a file's from `gst_filename_to_uri`; `loadData`'s bytes written to a temporary file, removed with the source), then `PAUSED`. Its `ASYNC_DONE`, once prerolled, is `didLoad`: the duration, `n-video` and `n-audio`, and the size of the preroll's picture. A live source (`NO_PREROLL`) has no duration |
+| `play`, `pause` | `PLAYING` and `PAUSED`, reported when the pipeline's `STATE_CHANGED` says so. A pause from the view's controls is the user's |
+| `seek` | A flushing, accurate seek, at the rate; answered at its `ASYNC_DONE`. While paused the view shows the picture where it landed. A flushing seek while playing passes through `PAUSED`, which isn't reported |
+| `setRate` | A seek where playback is, at the new rate |
+| `setVolume`, `setMuted` | `volume`, `mute` |
+| The end | `EOS`: `didEnd`, paused at the end; playing again starts from the start. Looping seeks to the start instead, so it isn't gapless |
+| Time | `didChangeTime` at the interval while playing, from the pipeline's position |
+| Buffering | A URL's `BUFFERING` messages: below 100% the pipeline pauses and the player is `buffering`; at 100% it plays again if it should. `didChangeBuffer` is the buffering query's range for a URL, and the rest of a file |
+| Errors | The bus's `ERROR`, by `GError` domain and code: a resource not found, or a server's refusal, `notFound`; one that can't be read, `network` for a URL; a sink that won't open, `unavailable`; no type, no decoder or a missing plugin, `unsupportedFormat`; decoding and demuxing, `decoding` |
+
+- **`canPlay`** asks GStreamer's registry: a demuxer or parser for the MIME
+  type's container (`video/mp4` is `video/quicktime`, `audio/mpeg` MPEG-1
+  audio), and decoders for the codecs `MediaPlayer.md` puts in it (H.264
+  and AAC in MP4). Both is `probably`; the container alone `maybe`. A type
+  without a mapping is tried as GStreamer's own name.
+- **The view** (`Sources/LinuxUI/HostVideoPlayer.swift`): the latest
+  picture as an `Image(pixels:)`, fitted, filled or stretched as the node's
+  `scaling` asks, on black. Unless `controls` is `none`, a bar over it has
+  play and pause, a scrubber that seeks when it's let go, and the time.
+  The player keeps playing when the view goes. The synced `NodeView` has
+  no `VideoPlayer` case yet, so `HostNodeViews` draws it; DarwinUI's later
+  revisions draw `GLSurface`, `WebView` and `VideoPlayer` through
+  providers, which a sync will have to set instead.
+- **`audio`** asks for nothing, as everywhere.
+- **Not yet**:
+  - What's playing outside the window (NowPlaying): MPRIS on the session
+    bus. The desktop doesn't send an app to the background, so a player
+    plays on with its window hidden, and `setPlaysInBackground` is refused.
+  - Interruptions and unplugged headphones: the sound server doesn't tell
+    a client, short of PulseAudio's corking.
+  - Hardware decoding: GStreamer's VA-API and V4L2 decoders would need the
+    sandbox's `/dev` (AppRuntime's §7.8). Pictures are copied once from
+    the `appsink` and drawn by Cairo, which is fine for a small video and
+    costly for 1080p.
+  - A frame for each of several views of one player: the last view to
+    appear gets the pictures.
+  - Sound has been played only into `fakesink`, and nothing has been heard
+    through a real sound server. The view has been laid out, not looked
+    at: no app here shows a video yet.
+
+## 16. Testing
 
 - `LinuxUI`: DarwinUI's tests, on Cacao (§5).
 - `LinuxBluetooth`: the contract against a fake `BlueZBus` that plays
@@ -778,6 +846,17 @@ ISO 15693 protocol is `ISO-15693`, and there's no `TagFound` signal).
   write, a read-only tag, locking and raw commands. neard's records as NDEF
   and back, and the NDEF encoding. The packager accepts the contracts with
   `nfc`.
+- `LinuxMedia`: the contract over real GStreamer, with sound into
+  `fakesink` and files the tests make: a WAV, and a second of Motion JPEG
+  in AVI that GStreamer encodes. Loading, playing before it's loaded, and
+  the end; pausing, seeking, and a seek replaced by another; the controls'
+  pause, which is the user's, and their seek; looping; the rate; bytes as a
+  file; what isn't media, a missing file, and a URL without `network`; a
+  video's size, its preroll's picture, pictures while playing and after a
+  seek; what the registry plays. GStreamer's errors and MIME types as the
+  contract has them. `VideoPlayer` nodes lay out in `LinuxUI`'s tests,
+  with and without controls. The packager accepts the contracts with
+  `audio`.
 - End to end: AppRuntime's `ExampleUI`, `ExampleGL` and `ExampleModel`
   bundles, their `linux-arm64` `libapp.so` loaded by `linux-app-host` and
   run headless with SDL's `offscreen` driver, each first frame saved with
@@ -790,7 +869,7 @@ ISO 15693 protocol is `ISO-15693`, and there's no `TagFound` signal).
   `bluetoothd`. Real GeoClue needs a session with an agent, or the app
   allowed in `geoclue.conf`.
 
-## 16. Phases
+## 17. Phases
 
 1. **Host runtime and player**: `LinuxHost`, `LinuxUI`, `LinuxBluetooth`,
    `LinuxHostApp`; `ExampleUI` runs in Docker.
@@ -801,12 +880,12 @@ ISO 15693 protocol is `ISO-15693`, and there's no `TagFound` signal).
 3. **More contracts**: formatting and HTTP are done: AppRuntime's
    `RuntimeFormatting` and `RuntimeNetworking` (§3), and so are the
    device (§10), location (§11), over GeoClue2, documents (§12), over
-   the desktop portal, motion (§13), over IIO, and NFC (§14), over
-   neard.
+   the desktop portal, motion (§13), over IIO, NFC (§14), over neard,
+   and media (§15), over GStreamer.
 4. **Player**: what DarwinUI and Cacao add: Cacao's AT-SPI bridge, input
    replay for end-to-end tests.
 
-## 17. Open questions
+## 18. Open questions
 
 - **Permissions.** Desktop Linux has no prompts for Bluetooth; Flatpak's
   portals cover location and the camera. `Permissions.request` answers from
