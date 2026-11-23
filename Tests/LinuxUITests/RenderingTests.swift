@@ -3,6 +3,10 @@ import DynamicUI
 @testable import Cacao
 import Testing
 @testable import LinuxUI
+#if os(Linux)
+import DynamicWebKit
+import LinuxWebKit
+#endif
 
 /// Hosts `RendererView` in a Cacao view graph and lays it out, for every
 /// node type and modifier kind. Adapted from DarwinAppRuntime's
@@ -228,6 +232,39 @@ struct RenderingTests {
             #expect(renderer.model(RenderNode.ID(100 + index * 10)) != nil)
         }
     }
+
+    #if os(Linux)
+    /// A page's delegate that hears nothing it needs.
+    final class QuietPage: WebContentDelegate {
+        func shouldNavigate(_ content: WebContent, url: String, kind: Int32, isMainFrame: Bool) -> Bool { true }
+        func didChangeURL(_ content: WebContent, url: String?) { }
+        func didChangeTitle(_ content: WebContent, title: String) { }
+        func didChangeLoading(_ content: WebContent, isLoading: Bool, progress: Double) { }
+        func didChangeHistory(_ content: WebContent, canGoBack: Bool, canGoForward: Bool) { }
+        func didFinishNavigation(_ content: WebContent) { }
+        func didFailNavigation(_ content: WebContent, error: Int32, message: String) { }
+        func didEvaluateJavaScript(_ content: WebContent, request: Int32, result: String?, error: String?) { }
+    }
+
+    /// A `WebView` node shows the page it names, attached while it's
+    /// there, and the page stays when it goes.
+    @Test(.enabled(if: LinuxWebKit.isAvailable, "WPE WebKit isn't installed"))
+    func aWebViewNodeShowsItsPage() throws {
+        let page = LinuxWebContent.make(QuietPage())
+        let content = try #require(page.content)
+        let (renderer, _) = makeRenderer()
+        let view = Self.host(renderer)
+        renderer.apply(RenderNode("WebView", id: 1, props: ["page": .int(Int(page.identifier()))],
+                                  modifiers: [ModifierNode("frame", ["width": 200.0, "height": 100.0])]))
+        Self.layOut(view)
+        #expect(content.isAttached)
+        #expect(content.size?.width == 200 && content.size?.height == 100)
+        renderer.apply(RenderNode("Text", id: 2, props: ["text": "Gone"]))
+        Self.layOut(view)
+        #expect(!content.isAttached)
+        #expect(LinuxWebContent.page(identifier: page.identifier()) === page)
+    }
+    #endif
 
     @Test func emptyRendererShowsNothing() {
         let (renderer, _) = makeRenderer()
