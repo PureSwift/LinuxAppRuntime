@@ -71,6 +71,7 @@ let package = Package(
         .library(name: "LinuxLocation", targets: ["LinuxLocation"]),
         .library(name: "LinuxMotion", targets: ["LinuxMotion"]),
         .library(name: "LinuxNFC", targets: ["LinuxNFC"]),
+        .library(name: "LinuxMedia", targets: ["LinuxMedia"]),
         .library(name: "LinuxHostApp", targets: ["LinuxHostApp"]),
         .executable(name: "linux-app-host", targets: ["LinuxAppHost"]),
         .executable(name: "linux-app", targets: ["LinuxAppTool"]),
@@ -109,7 +110,7 @@ let package = Package(
         // over Cacao's SwiftUI.
         .target(
             name: "LinuxUI",
-            dependencies: ["LinuxHost", "LinuxGraphics", "LinuxWebKit", runtime("DynamicUI"), runtime("DynamicRuntime"), runtime("RuntimeNative")] + swiftUI,
+            dependencies: ["LinuxHost", "LinuxGraphics", "LinuxWebKit", "LinuxMedia", runtime("DynamicUI"), runtime("DynamicRuntime"), runtime("RuntimeNative")] + swiftUI,
             exclude: ["DARWINUI_REVISION"],
             swiftSettings: host
         ),
@@ -221,6 +222,16 @@ let package = Package(
             swiftSettings: host
         ),
 
+        // MARK: - Media
+
+        // GStreamer's playbin, opened at run time.
+        .target(
+            name: "LinuxMedia",
+            dependencies: ["LinuxHost", runtime("DynamicMedia"), runtime("DynamicRuntime"), runtime("RuntimeMedia"), runtime("RuntimeHost"),
+                           runtime("RuntimeCore"), runtime("RuntimeNative")],
+            swiftSettings: host
+        ),
+
         // MARK: - App
 
         // What the runner's process supplies that libc may not
@@ -228,7 +239,7 @@ let package = Package(
         .target(name: "CLinuxHost"),
         .target(
             name: "LinuxHostApp",
-            dependencies: ["LinuxHost", "LinuxUI", "LinuxBluetooth", "LinuxGraphics", "LinuxWebKit", "LinuxCoreModel", "LinuxDevice", "LinuxLocation", "LinuxDocuments", "LinuxMotion", "LinuxNFC", "CLinuxHost", runtime("CRuntime"), runtime("RuntimeFormatting"), runtime("RuntimeNetworking"),
+            dependencies: ["LinuxHost", "LinuxUI", "LinuxBluetooth", "LinuxGraphics", "LinuxWebKit", "LinuxCoreModel", "LinuxDevice", "LinuxLocation", "LinuxDocuments", "LinuxMotion", "LinuxNFC", "LinuxMedia", "CLinuxHost", runtime("CRuntime"), runtime("RuntimeFormatting"), runtime("RuntimeNetworking"),
                            runtime("DynamicGraphics"), .product(name: "CacaoSDL", package: "Cacao")],
             swiftSettings: host
         ),
@@ -252,7 +263,7 @@ let package = Package(
         // doesn't build Cacao.
         .target(
             name: "LinuxPackager",
-            dependencies: ["LinuxHost", "LinuxBluetooth", "LinuxGraphics", "LinuxWebKit", "LinuxCoreModel", "LinuxDevice", "LinuxLocation", "LinuxDocuments", "LinuxMotion", "LinuxNFC", runtime("RuntimeFormatting"), runtime("RuntimeNetworking"), runtime("DynamicUI"),
+            dependencies: ["LinuxHost", "LinuxBluetooth", "LinuxGraphics", "LinuxWebKit", "LinuxCoreModel", "LinuxDevice", "LinuxLocation", "LinuxDocuments", "LinuxMotion", "LinuxNFC", "LinuxMedia", runtime("RuntimeFormatting"), runtime("RuntimeNetworking"), runtime("DynamicUI"),
                            .product(name: "Crypto", package: "swift-crypto")]
         ),
         .executableTarget(
@@ -287,6 +298,8 @@ let package = Package(
         .testTarget(name: "LinuxDocumentsTests", dependencies: ["LinuxDocuments", "LinuxDBus", runtime("DynamicDocuments"), runtime("RuntimeDocuments"),
                                                             runtime("DynamicFiles"), runtime("RuntimeHost"), runtime("RuntimeNative"),
                                                             .product(name: "DBus", package: "DBus")],
+                    swiftSettings: host),
+        .testTarget(name: "LinuxMediaTests", dependencies: ["LinuxMedia", runtime("DynamicMedia"), runtime("RuntimeMedia"), runtime("RuntimeHost")],
                     swiftSettings: host),
         .testTarget(name: "LinuxMotionTests", dependencies: ["LinuxMotion", runtime("DynamicMotion")], swiftSettings: host),
         .testTarget(name: "LinuxWebKitTests", dependencies: ["LinuxWebKit", runtime("DynamicWebKit")], swiftSettings: host),
