@@ -5,12 +5,14 @@ import LinuxHost
 
 /// A D-Bus bus, for the modules that talk to system services (`Plan.md`
 /// §11): method calls, property reads and writes, and signals by match
-/// rule. Main loop only.
+/// rule; and objects this process serves, with the names it owns
+/// (`BusObjects.swift`). Main loop only.
 ///
 /// The connection, PureSwift/DBus's, lives on Swift's own threads; every
 /// reply and signal is posted to the main loop. It's made on first use
 /// and, if it closes, made again on the next, with the subscriptions' match
-/// rules added again; subscribers to `MatchRule.disconnected` hear when it
+/// rules added again, and its objects served and its names asked for
+/// again; subscribers to `MatchRule.disconnected` hear when it
 /// closes. Requests are started in the order they're made, and one to the
 /// bus itself, such as `AddMatch`, is answered before the next starts.
 ///
@@ -31,14 +33,21 @@ public final class Bus {
     /// The system bus: BlueZ's, GeoClue's, iio-sensor-proxy's, neard's.
     nonisolated(unsafe) public static let system = Bus(.system)
 
-    /// The session bus: the desktop portal's.
+    /// The session bus: the desktop portal's, and the shell's media
+    /// controls'.
     nonisolated(unsafe) public static let session = Bus(.session)
 
     public let kind: Kind
 
-    private let loop: MainLoop
+    let loop: MainLoop
 
-    private let link: BusLink
+    let link: BusLink
+
+    /// The objects this process serves, by path, and the names it asked
+    /// for.
+    var exports: [String: [BusInterface]] = [:]
+
+    var names: Set<String> = []
 
     private var subscriptions: [UInt64: (rule: MatchRule, handler: (BusSignal) -> Void)] = [:]
 
@@ -273,6 +282,7 @@ public final class Bus {
             for rule in Set(subscriptions.values.map(\.rule)) {
                 addMatch(rule)
             }
+            serveAgain()
         case .signal(let signal):
             deliver(signal)
         case .closed(let error):
