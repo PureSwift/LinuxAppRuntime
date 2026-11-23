@@ -284,53 +284,49 @@ image:
 
 ## 8. Web views
 
-`LinuxWebKit` implements `WebContent` (AppRuntime's `WebKit.md`) with WPE
-WebKit, and the player draws `WebView` nodes. It follows Perry's
-(`Sources/PerryUIKit/WPE.swift` there):
+`LinuxWebKit` implements `WebContent` (AppRuntime's `WebKit.md`) over
+PureSwift/WebKit, whose `WPEWebKit` drives WPE WebKit, and the player shows
+`WebView` nodes with its `CacaoWebKit`. PureSwift/WebKit's own plan
+(`Documentation/Plan.md` there) has the engine's details; here is what the
+host adds:
 
-- **No WebKit at build time.** The host opens libwpe, WPEBackend-fdo,
-  libwayland-server, `libWPEWebKit-2.0.so.1`, GLib and GObject when a page
-  is first made, locally, so their symbols stand in for no others. Without
-  them a page loads nothing, and fails each load saying so. Debian 13
-  packages WPE 2.48 (`libwpewebkit-2.0-1`, `libwpebackend-fdo-1.0-1`);
-  Ubuntu 26.04 doesn't, so the development image and CI moved to Debian 13.
-- **Frames in shared memory.** WPEBackend-fdo runs in its SHM mode
-  (`wpe_fdo_initialize_shm`), and each page's exportable view backend hands
-  over every frame the web process draws as a `wl_shm` buffer: premultiplied
-  BGRA, turned into RGBA for Cacao's `Image(pixels:)`. WebKit draws on the
-  CPU; there's no GL.
-- **GLib's context** runs on the main loop every 8 ms while there are pages:
-  their signals, script results and frames all come through it.
-- **The contract** maps onto `WebKitWebView`:
-  - `load-changed`, `load-failed` and `load-failed-with-tls-errors` give
-    loading, finishing and failing;
-  - `notify::` on `uri`, `title` and `estimated-load-progress`, and the
-    history after each commit, give the rest;
-  - `uri` changes as soon as a load is asked for, and before a history
-    navigation is decided, so it's reported only once the navigation
-    commits or follows a redirect, as the contract wants;
-  - cancelled and replaced navigations aren't failures.
-- **Errors** come as GErrors and map to `WebError.Code`: WebKit's network
-  and policy errors, GIO's (a timeout is `timedOut`, the rest `network`),
-  the resolver's, and TLS (`security`).
-- **`decide-policy`** asks `shouldNavigate` for each navigation and new
-  window, except the guest's own `load`, `loadHTML` and `loadResource`. A
-  new window loads in the same page. WPE doesn't say which frame a
-  navigation is in, so `isMainFrame` is always true.
-- **Without `network`**:
-  - a remote `load`, or a navigation to a remote URL, fails with
-    `notPermitted` before it starts;
-  - every other request goes through a proxy on a `.invalid` host (RFC
-    2606), which never resolves, so remote subresources don't load.
-- **`loadResource`** loads a `file://` URL in the bundle's `resources/`,
-  refusing paths that leave it.
-- **The view** (`Sources/LinuxUI/HostWebView.swift`):
-  - It gives the page its size in points and the display's scale, and
-    makes it visible while it's on screen. The page stays loaded when the
-    view goes.
-  - A drag is the primary button, and hovering moves the pointer.
-  - A click focuses the page. Keys go to it as XKB keysyms, which WPE turns
-    into text.
+- **No WebKit at build time.** `WPEWebKit` opens libwpe, WPEBackend-fdo,
+  libwayland-server, `libWPEWebKit-2.0.so.1`, GLib, GObject, GIO and
+  libsoup when a page is first made, locally, so their symbols stand in for
+  no others. Without them a page loads nothing, and fails each load saying
+  so. Debian 13 packages WPE 2.48 (`libwpewebkit-2.0-1`,
+  `libwpebackend-fdo-1.0-1`); Ubuntu 26.04 doesn't, so the development
+  image and CI moved to Debian 13.
+- **The contract's page** (`LinuxWebContent`) makes a `WPEWebContent`,
+  whose delegate already has the contract's methods and numbers, and
+  passes what it hears to the guest's delegate. It refuses a load of what
+  isn't a URL, or of a remote URL without `network`, before anything
+  starts, with WPE or without; and it loads `loadResource`'s `file://` URL
+  from the bundle's `resources/`, refusing paths that leave it. The rest
+  is `WPEWebContent`'s:
+  - loading, finishing and failing from `load-changed`, `load-failed` and
+    `load-failed-with-tls-errors`, and the URL only once a navigation
+    commits; cancelled and replaced navigations aren't failures;
+  - GErrors mapped to `WebError.Code`;
+  - `decide-policy` asking `shouldNavigate` about each navigation and new
+    window but the guest's own loads, a new window loading in the same
+    page, and `isMainFrame` always true, as WPE doesn't say;
+  - without `network`, every other request going through a proxy on a
+    `.invalid` host (RFC 2606), which never resolves.
+- **GLib's context** runs on the main loop: `WPEEngine.pump()` there when
+  the engine says its pages have work (`WPEEngine.onReady`), so nothing
+  polls. A guest's call sets off a pump on the loop's next turn, so the
+  guest doesn't hear from a page while it's calling it.
+- **Frames** come from WPEBackend-fdo's SHM mode as premultiplied BGRA, and
+  go to the page's Cacao `ExternalSurface` as they are: no conversion, one
+  copy. WebKit draws on the CPU; there's no GL.
+- **The view** (`Sources/LinuxUI/HostWebView.swift`) is CacaoWebKit's
+  `WebView(content:)` over the page its node names:
+  - it attaches the page at its size in points and the display's scale
+    while it's on screen, and the page stays loaded when it goes;
+  - Cacao's input goes to the page: the pointer with its buttons, hover,
+    the wheel and smooth scrolling, a finger's tap as a click and its drag
+    as a scroll, keys, typed text with the keyboard's layout, and focus.
 - **The sandbox.** WebKit starts its web and network processes under
   bubblewrap, which can't make namespaces in a container, so the
   development image and CI set `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1`
@@ -338,12 +334,10 @@ WebKit, and the player draws `WebView` nodes. It follows Perry's
   own sandbox (AppRuntime's §7.8) it's still the open question `WebKit.md`
   names.
 - **Not yet**:
-  - The wheel: Cacao sends it only to its scroll views. Pages scroll with
-    the arrow keys, Page Up and Page Down, and Space.
   - `alert`, `confirm` and `prompt`: WebKit's defaults apply, which show
     nothing.
   - Permission requests: WebKit denies them by default.
-  - Touches, and buttons other than the primary.
+  - More than one finger: a pinch doesn't zoom.
   - Reading files beside a bundled page only: WebKit's file-URL rules
     apply.
 
