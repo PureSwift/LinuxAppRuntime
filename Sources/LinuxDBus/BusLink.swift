@@ -12,6 +12,10 @@ final class BusLink: @unchecked Sendable {
 
     typealias Completion = @Sendable (Result<[DBusMessageArgument], BusError>) -> Void
 
+    /// Work on the connection itself, such as exporting an object or
+    /// emitting a signal, in order with the requests.
+    typealias Action = @Sendable (DBusConnection) async -> Void
+
     enum Event: Sendable {
         /// Connected and said `Hello`; requests made while connecting are
         /// on their way.
@@ -22,14 +26,15 @@ final class BusLink: @unchecked Sendable {
     }
 
     private struct Outgoing: Sendable {
-        let message: DBusMessage
+        let message: DBusMessage?
         let completion: Completion
+        var action: Action?
 
         /// A request to the bus itself (`AddMatch`, `RemoveMatch`): the
         /// next isn't started until it's answered, so a match rule is in
         /// place before what was asked after it.
         var isBarrier: Bool {
-            message.destination == DBusWellKnown.busName
+            message?.destination == DBusWellKnown.busName
         }
     }
 
@@ -60,7 +65,17 @@ final class BusLink: @unchecked Sendable {
     /// Sends `message`; `completion` gets its reply's values or its error,
     /// on Swift's threads.
     func send(_ message: DBusMessage, _ completion: @escaping Completion) {
-        let item = Outgoing(message: message, completion: completion)
+        enqueue(Outgoing(message: message, completion: completion))
+    }
+
+    /// Runs `action` on the connection, connecting first if need be, after
+    /// what was asked before it. Without a connection it's dropped.
+    func perform(_ action: @escaping Action) {
+        enqueue(Outgoing(message: nil, completion: { _ in }, action: action))
+    }
+
+    private func enqueue(_ item: Outgoing) {
+        let completion = item.completion
         lock.lock()
         switch status {
         case .connected(let outgoing):
@@ -119,10 +134,14 @@ final class BusLink: @unchecked Sendable {
         let (outgoing, continuation) = AsyncStream.makeStream(of: Outgoing.self)
         let writer = Task {
             for await item in outgoing {
-                if item.isBarrier {
-                    item.completion(await Self.send(item.message, on: connection))
-                } else {
-                    await connection.begin(item.message, item.completion)
+                if let action = item.action {
+                    await action(connection)
+                } else if let message = item.message {
+                    if item.isBarrier {
+                        item.completion(await Self.send(message, on: connection))
+                    } else {
+                        await connection.begin(message, item.completion)
+                    }
                 }
             }
         }
