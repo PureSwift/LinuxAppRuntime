@@ -234,4 +234,85 @@ final class Daemon {
         run(loop) { !signals.isEmpty }
         #expect(signals.first?.body.first?.text == "org.example.LinuxDBusTests.Again")
     }
+
+    @Test(.enabled(if: Daemon.executable != nil, "needs dbus-daemon"))
+    func servesObjectsAndOwnsNames() throws {
+        let daemon = try Daemon()
+        let loop = MainLoop()
+        let bus = Bus(.address(daemon.address), loop: loop)
+        let other = Bus(.address(daemon.address), loop: loop)
+        var volume = 0.5
+        var greeted: [String] = []
+        bus.export("/org/example/Thing", [BusInterface("org.example.Thing", methods: [
+            BusMethod("Greet", input: "s", output: "s") { arguments in
+                greeted.append(arguments.first?.text ?? "")
+                return .success([.string("Hello, \(arguments.first?.text ?? "")")])
+            },
+            BusMethod("Refuse") { _ in .failure(BusError(name: "org.example.Error.No", message: "no")) },
+        ], properties: [
+            BusProperty("Name", "s") { .string("thing") },
+            BusProperty("Volume", "d", get: { .double(volume) }, set: { value in
+                volume = value.doubleValue ?? volume
+                return .success(())
+            }),
+        ])])
+        var owned: Bool?
+        bus.requestName("org.example.Served") { owned = try? $0.get() }
+        run(loop) { owned != nil }
+        #expect(owned == true)
+
+        func call(_ method: String, _ arguments: [DBusMessageArgument] = [], interface: String = "org.example.Thing")
+            -> Result<[DBusMessageArgument], BusError>? {
+            var result: Result<[DBusMessageArgument], BusError>?
+            other.call("org.example.Served", "/org/example/Thing", interface, method, arguments) { result = $0 }
+            run(loop) { result != nil }
+            return result
+        }
+        // Answered on the main loop, which the handlers run on.
+        #expect(try call("Greet", [.string("bus")])?.get().first?.text == "Hello, bus")
+        #expect(greeted == ["bus"])
+        if case .failure(let error)? = call("Refuse") {
+            #expect(error.name == "org.example.Error.No")
+        } else {
+            Issue.record("Refuse succeeded")
+        }
+
+        var all: [String: DBusMessageArgument]?
+        other.properties("org.example.Served", "/org/example/Thing", "org.example.Thing") { all = try? $0.get() }
+        run(loop) { all != nil }
+        #expect(all?["Name"]?.text == "thing" && all?["Volume"]?.doubleValue == 0.5)
+        var set: Result<Void, BusError>?
+        other.setProperty("org.example.Served", "/org/example/Thing", "org.example.Thing", "Volume", .double(0.8)) { set = $0 }
+        run(loop) { set != nil }
+        #expect(volume == 0.8)
+        var introspected: String?
+        if case .success(let values)? = call("Introspect", interface: "org.freedesktop.DBus.Introspectable") {
+            introspected = values.first?.text
+        }
+        #expect(introspected?.contains("org.example.Thing") == true)
+
+        // Signals from the object.
+        var changes: [BusSignal] = []
+        other.subscribe(MatchRule(path: "/org/example/Thing", member: "PropertiesChanged")) { changes.append($0) }
+        var pings: [BusSignal] = []
+        other.subscribe(MatchRule(interface: "org.example.Thing", member: "Pinged")) { pings.append($0) }
+        _ = call("Greet", [.string("again")])
+        bus.emitPropertiesChanged("/org/example/Thing", "org.example.Thing", ["Volume": .double(0.8)])
+        bus.emit("/org/example/Thing", "org.example.Thing", "Pinged", [.int64(7)])
+        run(loop) { !changes.isEmpty && !pings.isEmpty }
+        #expect(changes.first?.body.first?.text == "org.example.Thing")
+        #expect(changes.first?.body.dropFirst().first?.entries["Volume"]?.doubleValue == 0.8)
+        #expect(pings.first?.body.first?.int64Value == 7)
+
+        // Given up.
+        var released = false
+        bus.releaseName("org.example.Served") { _ in released = true }
+        run(loop) { released }
+        bus.unexport("/org/example/Thing")
+        var has: Bool?
+        other.call("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "NameHasOwner",
+                   [.string("org.example.Served")]) { has = (try? $0.get())?.first?.flag }
+        run(loop) { has != nil }
+        #expect(has == false)
+    }
 }
