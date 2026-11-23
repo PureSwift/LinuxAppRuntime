@@ -293,5 +293,7 @@ final class RecordingPlaybackDelegate: MediaPlaybackDelegate {
 
     func didFail(_ code: Int32, message: String) { failures.append((code, message)) }
 
-    func didReceiveCommand(_ command: Int32) { }
+    var commands: [Int32] = []
+
+    func didReceiveCommand(_ command: Int32) { commands.append(command) }
 }
