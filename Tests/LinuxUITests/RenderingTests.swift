@@ -153,6 +153,9 @@ struct RenderingTests {
             node("ContextMenu", [:], [label("Pressed"), node("Button", [:], [label("Copy")]), node("Divider")]),
             node("Refreshable", ["refreshing": false], [node("List", [:], [label("Pull")])]),
             node("NavLevel", ["title": "Loose level"], [label("level")]),
+            // No such players: black, with and without the controls.
+            node("VideoPlayer", ["player": 999, "scaling": "fill"]),
+            node("VideoPlayer", ["player": 998, "scaling": "stretch", "controls": "none"]),
             node("SomeFutureView", ["value": 1], [label("never shown")]),
         ]
         let toolbar = [
