@@ -28,13 +28,15 @@ jobs:
       WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: 1
     steps:
       - uses: actions/checkout@v4
-      - name: Install Cairo, FreeType, fontconfig and Wayland for Cacao, Mesa for GL, and WPE WebKit
+      - name: Install Cairo, FreeType, fontconfig and Wayland for Cacao, Mesa for GL, WPE WebKit, and GStreamer
         run: |
           apt-get update
           apt-get install -y --no-install-recommends cmake ninja-build git libcairo2-dev libfreetype-dev \
             libfontconfig-dev libwayland-dev wayland-protocols fonts-dejavu-core \
             libegl1 libegl-mesa0 libgles-dev libgl1-mesa-dri \
-            libwpewebkit-2.0-1 libwpebackend-fdo-1.0-1 libwayland-server0
+            libwpewebkit-2.0-1 libwpebackend-fdo-1.0-1 libwayland-server0 \
+            libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+            gstreamer1.0-libav
       # Debian's SDL is 3.2; PureSwift/SDL needs 3.4.
       - name: Build SDL3
         run: Scripts/build-sdl3.sh /usr -DCMAKE_INSTALL_LIBDIR=lib/$(uname -m)-linux-gnu

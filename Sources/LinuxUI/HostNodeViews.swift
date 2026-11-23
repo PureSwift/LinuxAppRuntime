@@ -1,5 +1,6 @@
 // Node types this host draws itself, ahead of DarwinUI: `GLSurface`
-// (HostGLSurface.swift) and `WebView` (HostWebView.swift).
+// (HostGLSurface.swift), `WebView` (HostWebView.swift) and `VideoPlayer`
+// (HostVideoPlayer.swift).
 // Scripts/sync-darwinui.sh keeps this file and has NodeView ask
 // `HostNodeViews` before it gives up on a type.
 import DynamicUI
@@ -23,6 +24,13 @@ enum HostNodeViews {
             return AnyView(HostWebView(identifier: Int32(clamping: node.props["page"]?.int ?? 0)))
             #else
             return AnyView(Color.white)
+            #endif
+        case "VideoPlayer":
+            #if os(Linux)
+            return AnyView(HostVideoPlayer(identifier: Int32(clamping: node.props["player"]?.int ?? 0),
+                                           scaling: node.props["scaling"]?.string, controls: node.props["controls"]?.string))
+            #else
+            return AnyView(Color.black)
             #endif
         default:
             return nil

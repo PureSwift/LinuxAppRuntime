@@ -30,6 +30,18 @@ public enum LinuxFiles: HostModule {
     /// directories come from the app's identifier and `LinuxBundle`, which
     /// `AppHost` sets up first.
     public static func register(in registrar: some ContractRegistrar) {
+        configureIfNeeded()
+        HostFilesModule.register(in: registrar)
+    }
+
+    /// Whether `HostFiles` knows where the app's files are.
+    nonisolated(unsafe) public private(set) static var isConfigured = false
+
+    /// Says where the app's files are, once: for `Files`, and for modules
+    /// that find the app's files without it, such as media.
+    public static func configureIfNeeded() {
+        guard !isConfigured else { return }
+        isConfigured = true
         let identifier = LinuxBundle.info.identifier
         do {
             let directories = try self.directories(identifier: identifier, resources: LinuxBundle.resources, environment: environment)
@@ -39,7 +51,6 @@ public enum LinuxFiles: HostModule {
             // Every operation then fails, and says so through its callback.
             HostLog.error("files: \(error)")
         }
-        HostFilesModule.register(in: registrar)
     }
 
     /// The environment the directories come from; replaceable for tests.

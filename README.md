@@ -65,6 +65,7 @@ added to its database between launches:
 | `LinuxDocuments` | `Documents`: AppRuntime's `HostDocuments` with the desktop portal's file chooser on the session bus, for opening, folders and saving, and bookmarks in the app's data ([plan](Documentation/Plan.md) §12) |
 | `LinuxMotion` | Motion: the accelerometer, gyroscope, magnetometer and barometer from the kernel's IIO sensors in sysfs, device motion fused from them, and a pedometer and activity recognizer that are unavailable ([plan](Documentation/Plan.md) §13) |
 | `LinuxNFC` | `NFCReader`, `NFCTag`, `NDEFMessage`, `NDEFRecord`: reading and writing NDEF tags through neard on the system bus; no raw commands or locking ([plan](Documentation/Plan.md) §14) |
+| `LinuxMedia` | `MediaPlayback`: songs and videos through GStreamer's `playbin`, opened at run time, from files, bytes or URLs; the player's `VideoPlayer` view shows the pictures, with play, pause and a scrubber ([plan](Documentation/Plan.md) §15) |
 | `LinuxHostApp`, `linux-app-host` | The app's `main`: the host, and Cacao's window and loop. It also registers AppRuntime's `RuntimeFormatting`, dates and numbers over Swift Foundation, and `RuntimeNetworking`, HTTP over `URLSession` and libcurl ([plan](Documentation/Plan.md) §3) |
 | `LinuxPackager`, `linux-app` | The packager: validation, thinning a bundle to one target, the install tree, PortMaster ports |
 
@@ -72,14 +73,17 @@ added to its database between launches:
 
 Swift 6.4.2 (`.swift-version`) on Debian 13; SDL 3.4, Cairo, FreeType,
 fontconfig and Wayland for Cacao; EGL and GLES 2.0, which GL surfaces load
-at run time and apps that draw link (Mesa's draw without a GPU); and WPE
-WebKit, which web views load at run time:
+at run time and apps that draw link (Mesa's draw without a GPU); WPE
+WebKit, which web views load at run time; and GStreamer, with its base and
+good plugins and libav's decoders, which media players load at run time:
 
 ```sh
 apt-get install cmake ninja-build git libcairo2-dev libfreetype-dev libfontconfig-dev \
     libwayland-dev wayland-protocols fonts-dejavu-core \
     libegl1 libegl-mesa0 libgles-dev libgl1-mesa-dri \
-    libwpewebkit-2.0-1 libwpebackend-fdo-1.0-1 libwayland-server0
+    libwpewebkit-2.0-1 libwpebackend-fdo-1.0-1 libwayland-server0 \
+    libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 gstreamer1.0-plugins-base \
+    gstreamer1.0-plugins-good gstreamer1.0-libav
 Scripts/build-sdl3.sh /usr -DCMAKE_INSTALL_LIBDIR=lib/$(uname -m)-linux-gnu
 swift build
 swift test

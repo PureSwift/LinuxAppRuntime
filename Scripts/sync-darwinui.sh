@@ -8,8 +8,8 @@
 # - `#if os(macOS)` code, which is for any platform but iOS: Linux is
 #   neither;
 # - NodeView, which asks `HostNodeViews` (HostNodeViews.swift) for a type
-#   it doesn't know before giving up on it: `GLSurface` and `WebView` are
-#   this host's.
+#   it doesn't know before giving up on it: `GLSurface`, `WebView` and
+#   `VideoPlayer` are this host's.
 #
 # Files named Host*.swift are this host's own, and stay.
 #

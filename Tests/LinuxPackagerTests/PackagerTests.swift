@@ -110,6 +110,15 @@ import Testing
         #expect(try diagnostics(fixture).map(\.message) == [])
     }
 
+    @Test func mediaIsImplemented() throws {
+        let fixture = try Fixture(contracts: [
+            ("org.pureswift.ui.Renderer", 1, "contract"),
+            ("org.pureswift.media.Playback", 1, "contract"),
+            ("org.pureswift.media.PlaybackDelegate", 1, "callback"),
+        ], capabilities: ["audio", "network"])
+        #expect(try diagnostics(fixture).map(\.message) == [])
+    }
+
     /// AppRuntime's `RuntimeNetworking`, over `FoundationNetworking`.
     @Test func networkingIsImplemented() throws {
         let fixture = try Fixture(contracts: [
@@ -180,7 +189,7 @@ import Testing
     }
 
     @Test func capabilitiesWithoutSupportWarn() throws {
-        let messages = try diagnostics(Fixture(capabilities: ["bluetooth", "location", "motion", "nfc", "notifications"]))
+        let messages = try diagnostics(Fixture(capabilities: ["audio", "bluetooth", "location", "motion", "nfc", "notifications"]))
         #expect(messages == [.warning("the app declares notifications, which the Linux host doesn't support yet")])
     }
 
