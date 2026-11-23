@@ -8,7 +8,9 @@ import WPEWebKit
 ///
 /// The page loads whether or not it's shown. The player's `WebView` view
 /// shows `content` with CacaoWebKit's `WebView(content:)`, which attaches it
-/// while it's on screen and forwards its input. Main thread only.
+/// while it's on screen and forwards its input. It runs the app's user
+/// scripts, passes on its script messages and their replies, and its URL
+/// schemes' requests. Main thread only.
 public final class LinuxWebContent: WebContent {
 
     public let delegate: any WebContentDelegate
@@ -22,6 +24,16 @@ public final class LinuxWebContent: WebContent {
     /// What the engine's page reports to, passed on to `delegate`.
     private let relay: Relay
 
+    /// Replies the page awaits, by the number the guest has for each.
+    private var replies: [Int32: WPEScriptMessageReply] = [:]
+
+    private var nextReply: Int32 = 1
+
+    /// Requests in the app's schemes not yet answered, likewise.
+    private var tasks: [Int32: WPEURLSchemeTask] = [:]
+
+    private var nextTask: Int32 = 1
+
     private init(delegate: any WebContentDelegate, id: Int32) {
         self.delegate = delegate
         self.id = id
@@ -29,7 +41,22 @@ public final class LinuxWebContent: WebContent {
         relay = Relay()
         content = WPEWebContent(delegate: relay)
         relay.page = self
-        if content != nil {
+        if let content {
+            content.onScriptMessage = { [weak self] name, body in
+                self?.received(name, body, reply: nil)
+            }
+            content.onScriptMessageWithReply = { [weak self] name, body, reply in
+                guard let self else {
+                    return reply.returnError("the page went away")
+                }
+                self.received(name, body, reply: reply)
+            }
+            content.onURLSchemeRequest = { [weak self] task in
+                guard let self else {
+                    return task.fail(.cancelled, message: "the page went away")
+                }
+                self.start(task)
+            }
             // The engine watches what the new page waits for from here on.
             LinuxWebKit.pump()
         }
@@ -37,6 +64,12 @@ public final class LinuxWebContent: WebContent {
 
     deinit {
         Self.pages[id] = nil
+        for reply in replies.values {
+            reply.returnError("the page went away")
+        }
+        for task in tasks.values {
+            task.fail(.cancelled, message: "the page went away")
+        }
     }
 
     // MARK: WebContent
@@ -45,6 +78,25 @@ public final class LinuxWebContent: WebContent {
         let page = LinuxWebContent(delegate: delegate, id: nextID)
         nextID &+= 1
         pages[page.id] = Weak(page)
+        return page
+    }
+
+    /// What this host does beyond loading a page: what an app talks to its
+    /// pages with. None of a browser's or a mail reader's features yet.
+    public static func features() -> Int32 {
+        guard LinuxWebKit.isAvailable else { return 0 }
+        return WebFeatures([.userScripts, .scriptMessages, .messageReplies, .urlSchemes]).rawValue
+    }
+
+    /// The default store and no options, as `features()` offers no others,
+    /// answering `schemes`. A scheme WebKit loads itself is left to it.
+    public static func make(_ delegate: any WebContentDelegate, dataStore: Int32, options: Int32, schemes: [String]) -> LinuxWebContent {
+        let page = make(delegate)
+        if let content = page.content {
+            for scheme in schemes where !content.registerURLScheme(scheme) {
+                HostLog.warning("web: \(scheme) can't be an app's scheme")
+            }
+        }
         return page
     }
 
@@ -114,6 +166,65 @@ public final class LinuxWebContent: WebContent {
         }
         content.evaluateJavaScript(script, request: request)
         LinuxWebKit.pump()
+    }
+
+    // MARK: Scripts and schemes
+
+    public func addUserScript(_ source: String, atDocumentStart: Bool, mainFrameOnly: Bool) {
+        content?.addUserScript(source, atDocumentStart: atDocumentStart, mainFrameOnly: mainFrameOnly)
+    }
+
+    public func removeAllUserScripts() {
+        content?.removeAllUserScripts()
+    }
+
+    public func addMessageHandler(_ name: String, replies: Bool) {
+        content?.addScriptMessageHandler(name, replies: replies)
+    }
+
+    public func removeMessageHandler(_ name: String) {
+        content?.removeScriptMessageHandler(name)
+    }
+
+    public func replyToMessage(_ reply: Int32, result: String?, error: String?) {
+        guard let pending = replies.removeValue(forKey: reply) else { return }
+        if let error {
+            pending.returnError(error)
+        } else {
+            pending.returnValue(json: result)
+        }
+        LinuxWebKit.pump()
+    }
+
+    public func finishURLSchemeTask(_ task: Int32, status: Int32, contentType: String?, headers: [String], body: [UInt8]) {
+        guard let pending = tasks.removeValue(forKey: task) else { return }
+        let pairs = stride(from: 0, to: headers.count - 1, by: 2).map { (name: headers[$0], value: headers[$0 + 1]) }
+        pending.finish(status: Int(status), contentType: contentType, headers: pairs, body: body)
+        LinuxWebKit.pump()
+    }
+
+    public func failURLSchemeTask(_ task: Int32, error: Int32, message: String) {
+        guard let pending = tasks.removeValue(forKey: task) else { return }
+        pending.fail(WPEWebContent.ErrorCode(rawValue: error) ?? .unknown, message: message)
+        LinuxWebKit.pump()
+    }
+
+    private func received(_ name: String, _ body: String?, reply: WPEScriptMessageReply?) {
+        var number: Int32 = 0
+        if let reply {
+            number = nextReply
+            nextReply = nextReply == .max ? 1 : nextReply + 1
+            replies[number] = reply
+        }
+        delegate.didReceiveMessage(self, name: name, body: body, reply: number)
+    }
+
+    private func start(_ task: WPEURLSchemeTask) {
+        let number = nextTask
+        nextTask = nextTask == .max ? 1 : nextTask + 1
+        tasks[number] = task
+        delegate.startURLSchemeTask(self, task: number, url: task.url, method: task.method,
+                                    headers: task.headers.flatMap { [$0.name, $0.value] }, body: task.body)
     }
 
     private func unavailable() {
